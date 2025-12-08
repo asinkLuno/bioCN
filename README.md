@@ -1,6 +1,6 @@
 # bioCN
 
-Chinese bionic reading EPUB processor with HanLP grammar analysis.
+中文仿生阅读 EPUB 处理器，基于 HanLP 语法分析实现。
 
 ## 功能简介
 
@@ -8,8 +8,8 @@ bioCN 是一个为中文 EPUB 电子书增强阅读体验的工具。它通过�
 
 - **语法高亮**：使用自然语言处理分析中文句子结构
 - **主谓宾标记**：
-  - 主语（Subject）- 蓝色粗体
-  - 谓语（Predicate）- 下划线
+  - 主语（Subject）- 红色粗体
+  - 谓语（Predicate）- 蓝色粗体
   - 宾语（Object）- 绿色粗体
 - **进度显示**：处理大型 EPUB 时显示实时进度
 
@@ -18,13 +18,22 @@ bioCN 是一个为中文 EPUB 电子书增强阅读体验的工具。它通过�
 ### 前置要求
 
 - Python 3.10+
-- uv (推荐的 Python 包管理器)
 
-### 使用 uv 安装
+### 方法一：使用 pip 安装（推荐）
+
+```bash
+# 从 PyPI 安装
+pip install bioCN
+
+# 或者从源码安装最新版本
+pip install git+https://github.com/asinkLuno/bioCN.git
+```
+
+### 方法二：使用 uv 开发安装
 
 ```bash
 # 克隆仓库
-git clone https://github.com/yourusername/bioCN.git
+git clone https://github.com/asinkLuno/bioCN.git
 cd bioCN
 
 # 安装依赖
@@ -43,14 +52,24 @@ uv sync --group dev
 
 ## 使用方法
 
-### 基本用法
+### pip 安装后使用
 
 ```bash
 # 处理 EPUB 文件（自动生成输出路径）
-uv run python -m src.cli --input-path your-book.epub
+biocn --input-path your-book.epub
 
 # 指定输出路径
-uv run python -m src.cli --input-path your-book.epub --output-path processed-book.epub
+biocn --input-path your-book.epub --output-path processed-book.epub
+```
+
+### uv 开发环境使用
+
+```bash
+# 处理 EPUB 文件
+uv run biocn --input-path your-book.epub
+
+# 或者使用模块方式
+uv run python -m src.cli --input-path your-book.epub
 ```
 
 ### 输出规则
@@ -61,7 +80,11 @@ uv run python -m src.cli --input-path your-book.epub --output-path processed-boo
 
 ```bash
 # 处理《窄门.epub》，生成《窄门_bio.epub》
-uv run python -m src.cli --input-path tests/窄门.epub
+# pip 安装后：
+biocn --input-path 窄门.epub
+
+# uv 开发环境：
+uv run biocn --input-path tests/窄门.epub
 ```
 
 ## 技术原理
@@ -81,8 +104,8 @@ uv run python -m src.cli --input-path tests/窄门.epub
 
 ### 标记规则
 
-- **主语**：`<span style="color: blue; font-weight: bold;">文本</span>`
-- **谓语**：`<span style="text-decoration: underline;">文本</span>`
+- **主语**：`<span style="color: red; font-weight: bold;">文本</span>`
+- **谓语**：`<span style="color: blue; font-weight: bold;">文本</span>`
 - **宾语**：`<span style="color: green; font-weight: bold;">文本</span>`
 
 ## 开发
@@ -129,14 +152,15 @@ bioCN/
 
 ## 注意事项
 
-1. **首次运行**：HanLP 会自动下载预训练模型，需要网络连接
-2. **处理时间**：大型 EPUB 文件可能需要几分钟处理时间
-3. **兼容性**：仅支持标准 EPUB 格式
-4. **语言支持**：专门针对中文文本设计
+1. **包发布状态**：bioCN 尚未发布到 PyPI，请使用 `pip install git+https://github.com/asinkLuno/bioCN.git` 从源码安装
+2. **首次运行**：HanLP 会自动下载预训练模型，需要网络连接
+3. **处理时间**：大型 EPUB 文件可能需要几分钟处理时间
+4. **兼容性**：仅支持标准 EPUB 格式
+5. **语言支持**：专门针对中文文本设计
 
 ## 许可证
 
-[请在此添加许可证信息]
+本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
 
 ## 贡献
 
