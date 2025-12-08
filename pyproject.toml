@@ -1,7 +1,7 @@
 [project]
 name = "biocn"
 version = "0.1.0"
-description = "Chinese bionic reading EPUB processor with DDParser grammar analysis"
+description = "Chinese bionic reading EPUB processor with HanLP grammar analysis"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-biocn = "src.cli:main"
+biocn = "src.cli:cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
@@ -28,6 +28,7 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "autoflake>=2.3.1",
+    "autopep8>=2.3.2",
     "isort>=7.0.0",
     "pytest>=9.0.2",
     "ruff>=0.14.8",
