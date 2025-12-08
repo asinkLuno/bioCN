@@ -18,7 +18,18 @@ class EpubParser:
         self.file_path = file_path
         self.book = epub.read_epub(self.file_path)
 
-    def parse_chinese(self, chinese_analyzer: "ChineseAnalyzer") -> None:
+    def get_document_count(self) -> int:
+        """
+        Returns the number of documents in the EPUB file.
+        """
+        return len(list(self.book.get_items_of_type(ebooklib.ITEM_DOCUMENT)))
+
+    def parse_chinese(
+        self,
+        chinese_analyzer: "ChineseAnalyzer",
+        progress: "Progress",
+        task: "TaskID",
+    ) -> None:
         """
         Extracts and analyzes Chinese text from the EPUB file with SVO markup.
         Marks subjects (blue bold), predicates (underline), objects (green bold).
@@ -26,10 +37,10 @@ class EpubParser:
 
         Args:
             chinese_analyzer: The Chinese analyzer for SVO extraction.
+            progress: The rich progress bar object.
+            task: The rich progress bar task ID.
         """
         for item in list(self.book.get_items_of_type(ebooklib.ITEM_DOCUMENT)):
-            print("Analyzing new item...")
-
             soup = BeautifulSoup(item.get_content(), "html.parser")
 
             paragraphs = soup.find_all("p")
@@ -43,6 +54,7 @@ class EpubParser:
 
             # Update the item content in the book
             item.set_content(str(soup).encode("utf-8"))
+            progress.advance(task)
 
     def save(self, output_path: str) -> None:
         """

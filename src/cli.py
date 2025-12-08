@@ -7,6 +7,8 @@ from pathlib import Path
 
 import click
 from rich.console import Console
+from rich.panel import Panel
+from rich.progress import Progress
 
 from src.analyzer import ChineseAnalyzer
 from src.epub_parser import EpubParser
@@ -64,20 +66,39 @@ def generate_default_output_path(ctx, param, value):
     help="Path where the processed EPUB will be saved. Defaults to input directory with '_bio' suffix.",
 )
 def cli(epub_path: Path, output_path: Path):
+    """Processes an EPUB file to apply bionic reading formatting to Chinese text."""
     console = Console()
-    console.print(f"Processing EPUB: {epub_path}")
-    console.print(f"Output will be saved to: {output_path}")
 
-    parser = EpubParser(str(epub_path))
+    # Display header
+    header = f"[bold cyan]Bionic Reading EPUB Processor[/bold cyan]\n\n"
+    header += f"Input: [green]{epub_path}[/green]\n"
+    header += f"Output: [green]{output_path}[/green]"
+    console.print(Panel(header, expand=False))
+
+    console.print("Loading NLP model...", style="yellow")
     chinese_analyzer = ChineseAnalyzer()
 
-    console.print("Analyzing Chinese text and marking SVO structures...")
-    parser.parse_chinese(chinese_analyzer)
+    parser = EpubParser(str(epub_path))
+    doc_count = parser.get_document_count()
 
-    console.print(f"Saving processed EPUB to: {output_path}")
-    parser.save(str(output_path))
+    with Progress(
+        transient=True,
+        redirect_stderr=False,
+        redirect_stdout=False,
+        console=console,
+    ) as progress:
+        task = progress.add_task("[b]Processing...[/b]", total=doc_count)
 
-    console.print("[green]✓[/green] EPUB processing completed!")
+        parser.parse_chinese(chinese_analyzer, progress, task)
+
+        # After processing, save the file
+        console.print("Saving EPUB...", style="yellow")
+        parser.save(str(output_path))
+
+    console.print(f"[bold green]✓[/bold green] Processing complete!")
+    console.print(
+        f"✓ [bold]Output saved to:[/bold] [link=file://{output_path}]{output_path}[/link]"
+    )
 
 
 if __name__ == "__main__":
