@@ -59,62 +59,22 @@ class EpubParser:
             soup: The BeautifulSoup object to modify.
             sentence_svos: Dictionary mapping sentences to their SVO structures.
         """
+        styles = {
+            "subject": '<span style="color: blue; font-weight: bold;">',
+            "predicate": '<span style="text-decoration: underline;">',
+            "object": '<span style="color: yellow; font-weight: bold;">',
+        }
+
         for sentence, svo_list in sentence_svos.items():
             for svo in svo_list:
-                self._mark_svo_components(soup, svo)
-
-    def _mark_svo_components(self, soup: BeautifulSoup, svo: dict) -> None:
-        """
-        Marks individual SVO components in the HTML.
-
-        Args:
-            soup: The BeautifulSoup object to modify.
-            svo: Dictionary containing subject, predicate, object.
-        """
-        # Mark subject (blue bold)
-        if svo["subject"]:
-            self._mark_text(
-                soup,
-                svo["subject"],
-                '<span style="color: blue; font-weight: bold;">',
-                "</span>",
-            )
-
-        # Mark predicate (underline)
-        if svo["predicate"]:
-            self._mark_text(
-                soup,
-                svo["predicate"],
-                '<span style="text-decoration: underline;">',
-                "</span>",
-            )
-
-        # Mark object (green bold)
-        if svo["object"]:
-            self._mark_text(
-                soup,
-                svo["object"],
-                '<span style="color: green; font-weight: bold;">',
-                "</span>",
-            )
-
-    def _mark_text(
-        self, soup: BeautifulSoup, text: str, start_tag: str, end_tag: str
-    ) -> None:
-        """
-        Marks specific text in the BeautifulSoup with the given tags.
-
-        Args:
-            soup: The BeautifulSoup object to modify.
-            text: The text to mark.
-            start_tag: The opening tag to wrap around the text.
-            end_tag: The closing tag to wrap around the text.
-        """
-        if not text:
-            return
-
-        # Find all text nodes and replace the text if it matches
-        for element in soup.find_all(string=True):
-            if text in element:
-                new_text = element.replace(text, f"{start_tag}{text}{end_tag}")
-                element.replace_with(BeautifulSoup(new_text, "html.parser"))
+                for component, style_tag in styles.items():
+                    if svo[component]:
+                        text = svo[component]
+                        for element in soup.find_all(string=True):
+                            if text in element:
+                                new_text = element.replace(
+                                    text, f"{style_tag}{text}</span>"
+                                )
+                                element.replace_with(
+                                    BeautifulSoup(new_text, "html.parser")
+                                )
