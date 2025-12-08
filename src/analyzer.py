@@ -15,11 +15,13 @@ logging.basicConfig(level=logging.INFO)
 class ChineseAnalyzer:
     """
     A Chinese text analyzer using HanLP to extract Subject-Verb-Object structures.
+    This implementation uses dependency parsing (UDEP).
     """
 
     def __init__(self):
+        # Using CLOSE_TOK_POS_NER_SRL_UDEP_SDP_CON_ELECTRA_SMALL_ZH for Universal Dependencies.
         self.hanlp = hanlp.load(
-            hanlp.pretrained.mtl.CLOSE_TOK_POS_NER_SRL_DEP_SDP_CON_ELECTRA_SMALL_ZH
+            hanlp.pretrained.mtl.CLOSE_TOK_POS_NER_SRL_UDEP_SDP_CON_ELECTRA_SMALL_ZH
         )
 
     def analyze(self, text: str) -> Dict[str, List[Dict[str, str]]]:
@@ -30,38 +32,39 @@ class ChineseAnalyzer:
         if not sentences:
             return {}
 
-        # Use SRL (Semantic Role Labeling) for accurate SVO extraction
-        docs = self.hanlp(sentences, tasks=["tok", "srl"])
-
-        if "srl" not in docs:
-            return {}
+        # Run all tasks in the pipeline. This is more efficient than looping.
+        docs = self.hanlp(sentences)
 
         sentence_svos = {}
 
-        for i, predicate_groups in enumerate(docs["srl"]):
-            sentence = sentences[i].strip()
-            docs["tok/fine"][i]
+        # The dependency parse tree is in doc['dep']
+        # The PoS tags are in doc['pos/ctb']
+        for i, sentence in enumerate(sentences):
+            sentence = sentence.strip()
+            deps = docs["dep"][i]
+            pos_tags = docs["pos/ctb"][i]
+            words = docs["tok/fine"][i]
 
             svo_results = []
 
-            # Each predicate group contains roles for one predicate
-            for roles in predicate_groups:
-                # Find the predicate in this group
-                predicate = ""
+            # Find verbs and their indices
+            verbs = [(j, word) for j, word in enumerate(words) if pos_tags[j] == "VV"]
+
+            for verb_idx, verb in verbs:
                 subject = ""
                 obj = ""
+                # Find subject and object for this verb
+                for j, (head, rel) in enumerate(deps):
+                    # HanLP dependency heads are 1-based, so adjust verb_idx
+                    if head == verb_idx + 1:
+                        if rel == "nsubj":
+                            subject = words[j]
+                        elif rel in ("obj", "dobj"):
+                            obj = words[j]
 
-                for role_text, role_type, start, end in roles:
-                    if role_type == "PRED":
-                        predicate = role_text
-                    elif role_type == "ARG0":
-                        subject = role_text
-                    elif role_type == "ARG1":
-                        obj = role_text
-
-                if predicate:  # Only add if we found a predicate
+                if subject and obj:
                     svo_results.append(
-                        {"subject": subject, "predicate": predicate, "object": obj}
+                        {"subject": subject, "predicate": verb, "object": obj}
                     )
 
             if svo_results:
