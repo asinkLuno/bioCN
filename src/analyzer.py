@@ -62,7 +62,7 @@ class ChineseAnalyzer:
                         elif rel in ("obj", "dobj"):
                             obj = words[j]
 
-                if subject and obj:
+                if subject or verb or obj:
                     svo_results.append(
                         {"subject": subject, "predicate": verb, "object": obj}
                     )
