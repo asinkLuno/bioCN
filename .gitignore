@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Test output files
+tests/*_bio.epub
+tests/*_processed.epub
