@@ -28,6 +28,22 @@ def validate_epub_path(ctx, param, value):
     return path
 
 
+def generate_default_output_path(ctx, param, value):
+    """Generate default output path based on input path if not provided."""
+    if value is not None:
+        return Path(value)
+
+    # Get the input path from the context
+    epub_path = ctx.params.get('epub_path')
+    if epub_path is None:
+        raise click.BadParameter("Cannot generate default output path without input path")
+
+    # Generate default: same directory, same name with _bio suffix
+    stem = epub_path.stem
+    default_output = epub_path.parent / f"{stem}_bio.epub"
+    return default_output
+
+
 @click.command()
 @click.option(
     "--input-path",
@@ -40,13 +56,15 @@ def validate_epub_path(ctx, param, value):
 @click.option(
     "--output-path",
     "output_path",
-    required=True,
+    required=False,
     type=click.Path(),
-    help="Path where the processed EPUB will be saved.",
+    callback=generate_default_output_path,
+    help="Path where the processed EPUB will be saved. Defaults to input directory with '_bio' suffix.",
 )
 def cli(epub_path: Path, output_path: Path):
     console = Console()
     console.print(f"Processing EPUB: {epub_path}")
+    console.print(f"Output will be saved to: {output_path}")
 
     parser = EpubParser(str(epub_path))
     chinese_analyzer = ChineseAnalyzer()
