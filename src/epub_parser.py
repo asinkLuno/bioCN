@@ -32,12 +32,14 @@ class EpubParser:
 
             soup = BeautifulSoup(item.get_content(), "html.parser")
 
-            # Get all text for analysis
-            text = soup.get_text()
-            sentence_svos = chinese_analyzer.analyze(text)
+            paragraphs = soup.find_all("p")
+            for p in paragraphs:
+                text = p.get_text()
+                if not text.strip():
+                    continue
 
-            # Mark SVO structures in the HTML
-            self._mark_svo_in_soup(soup, sentence_svos)
+                sentence_svos = chinese_analyzer.analyze(text)
+                self._mark_svo_in_soup(p, sentence_svos)
 
             # Update the item content in the book
             item.set_content(str(soup).encode("utf-8"))
@@ -61,8 +63,8 @@ class EpubParser:
         """
         styles = {
             "subject": '<span style="color: blue; font-weight: bold;">',
-            "predicate": '<span style="text-decoration: underline;">',
-            "object": '<span style="color: yellow; font-weight: bold;">',
+            "predicate": '<span style="color: red; font-weight: bold;">',
+            "object": '<span style="color: green; font-weight: bold;">',
         }
 
         for sentence, svo_list in sentence_svos.items():

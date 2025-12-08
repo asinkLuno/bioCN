@@ -34,9 +34,11 @@ def generate_default_output_path(ctx, param, value):
         return Path(value)
 
     # Get the input path from the context
-    epub_path = ctx.params.get('epub_path')
+    epub_path = ctx.params.get("epub_path")
     if epub_path is None:
-        raise click.BadParameter("Cannot generate default output path without input path")
+        raise click.BadParameter(
+            "Cannot generate default output path without input path"
+        )
 
     # Generate default: same directory, same name with _bio suffix
     stem = epub_path.stem
