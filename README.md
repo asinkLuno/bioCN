@@ -22,10 +22,7 @@ bioCN 是一个为中文 EPUB 电子书增强阅读体验的工具。它通过�
 ### 方法一：使用 pip 安装（推荐）
 
 ```bash
-# 从 PyPI 安装
-pip install bioCN
-
-# 或者从源码安装最新版本
+# 从源码安装最新版本
 pip install git+https://github.com/asinkLuno/bioCN.git
 ```
 
