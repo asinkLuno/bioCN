@@ -30,35 +30,39 @@ class ChineseAnalyzer:
         if not sentences:
             return {}
 
-        docs = self.hanlp(sentences, tasks="srl")
+        # Use SRL (Semantic Role Labeling) for accurate SVO extraction
+        docs = self.hanlp(sentences, tasks=["tok", "srl"])
 
-        # Check if 'srl' key exists
         if "srl" not in docs:
             return {}
 
         sentence_svos = {}
 
-        # Process each sentence
-        for i, srl_for_sentence in enumerate(docs["srl"]):
+        for i, predicate_groups in enumerate(docs["srl"]):
             sentence = sentences[i].strip()
+            docs["tok/fine"][i]
+
             svo_results = []
 
-            # srl_for_sentence is a list of predicates found in one sentence
-            for roles_for_predicate in srl_for_sentence:
-                svo = {"subject": "", "predicate": "", "object": ""}
-                # roles_for_predicate is a list of lists/tuples
-                for role_info in roles_for_predicate:
-                    span, role, _, _ = role_info
+            # Each predicate group contains roles for one predicate
+            for roles in predicate_groups:
+                # Find the predicate in this group
+                predicate = ""
+                subject = ""
+                obj = ""
 
-                    if role == "PRED":
-                        svo["predicate"] = span
-                    elif role == "ARG0":
-                        svo["subject"] = span
-                    elif role == "ARG1":
-                        svo["object"] = span
+                for role_text, role_type, start, end in roles:
+                    if role_type == "PRED":
+                        predicate = role_text
+                    elif role_type == "ARG0":
+                        subject = role_text
+                    elif role_type == "ARG1":
+                        obj = role_text
 
-                if svo["predicate"]:
-                    svo_results.append(svo)
+                if predicate:  # Only add if we found a predicate
+                    svo_results.append(
+                        {"subject": subject, "predicate": predicate, "object": obj}
+                    )
 
             if svo_results:
                 sentence_svos[sentence] = svo_results
