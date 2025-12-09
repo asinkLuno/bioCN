@@ -74,9 +74,9 @@ class EpubParser:
             sentence_svos: Dictionary mapping sentences to their SVO structures.
         """
         styles = {
-            "subject": '<span style="color: red; font-weight: bold;">',
-            "predicate": '<span style="color: blue; font-weight: bold;">',
-            "object": '<span style="color: green; font-weight: bold;">',
+            "subject": '<span style="color: #D95F02; font-weight: bold;">',
+            "predicate": '<span style="color: #1B9E77; font-weight: bold;">',
+            "object": '<span style="color: #7570B3; font-weight: bold;">',
         }
 
         for sentence, svo_list in sentence_svos.items():
