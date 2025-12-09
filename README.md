@@ -15,13 +15,7 @@ bioCN 是一个为中文 EPUB 电子书增强阅读体验的工具。它通过�
 
 ## 效果预览
 
-### 人文社科类
-
-![人文社科样例](screenshot_social_science.png)
-
-### 小说类
-
-![小说样例](screenshot_novel.png)
+![小说样例](screenshot.png)
 
 ## 安装
 
