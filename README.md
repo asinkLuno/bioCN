@@ -14,32 +14,50 @@ bioCN 是一个为中文 EPUB 电子书增强阅读体验的工具。它通过�
 
 - Python 3.10+
 
-### 方法一：使用 pip 安装（推荐）
+### 1. 使用 pip 安装
 
+这种方式会将 `bioCN` 安装为命令行工具，适合直接使用。
+
+#### GPU 环境 (默认)
 ```bash
-# 从源码安装最新版本
+# pip 会自动安装 torch，并优先使用 GPU 版本（如果环境支持）
 pip install git+https://github.com/asinkLuno/bioCN.git
 ```
 
-### 方法二：使用 uv 开发安装
-
+#### 纯 CPU 环境
 ```bash
-# 克隆仓库
-git clone https://github.com/asinkLuno/bioCN.git
-cd bioCN
-
-# 安装依赖
-uv sync
-
-# 激活虚拟环境
-source .venv/bin/activate
+# 通过指定 Pytorch 的 CPU-only 索引来强制安装纯 CPU 版本
+pip install --index-url https://download.pytorch.org/whl/cpu git+https://github.com/asinkLuno/bioCN.git
 ```
 
-### 开发环境安装
+### 2. 使用 uv 开发安装
 
+这种方式适合需要修改代码或进行二次开发的场景。
+
+**首先**，克隆本仓库并进入项目目录：
 ```bash
-# 安装开发依赖
-uv sync --group dev
+git clone https://github.com/asinkLuno/bioCN.git
+cd bioCN
+```
+
+**然后**，根据您的环境选择对应的命令安装依赖：
+
+#### GPU 环境 (默认)
+```bash
+# 安装基础依赖
+uv pip install -e .
+
+# 安装基础依赖 + 开发依赖
+uv pip install -e '.[dev]'
+```
+
+#### 纯 CPU 环境
+```bash
+# 安装基础依赖
+uv pip install --index-url https://download.pytorch.org/whl/cpu -e .
+
+# 安装基础依赖 + 开发依赖
+uv pip install --index-url https://download.pytorch.org/whl/cpu -e '.[dev]'
 ```
 
 ## 使用方法
@@ -71,12 +89,12 @@ uv run python -m src.cli --input-path your-book.epub
 ### 示例
 
 ```bash
-# 处理《窄门.epub》，生成《窄门_bio.epub》
+# 处理 故事新编.epub，生成故事新编_bio.epub
 # pip 安装后：
-biocn --input-path 窄门.epub
+biocn --input-path 故事新编.epub
 
 # uv 开发环境：
-uv run biocn --input-path tests/窄门.epub
+uv run biocn --input-path tests/故事新编.epub
 ```
 
 ## 技术原理
@@ -96,9 +114,9 @@ uv run biocn --input-path tests/窄门.epub
 
 ### 标记规则
 
-- **主语**：`<span style="color: red; font-weight: bold;">文本</span>`
-- **谓语**：`<span style="color: blue; font-weight: bold;">文本</span>`
-- **宾语**：`<span style="color: green; font-weight: bold;">文本</span>`
+- **主语**：`<span style="color: #D95F02; font-weight: bold;">文本</span>`
+- **谓语**：`<span style="color: #1B9E77; font-weight: bold;">文本</span>`
+- **宾语**：`<span style="color: #7570B3; font-weight: bold;">文本</span>`
 
 ## 开发
 
