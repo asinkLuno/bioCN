@@ -65,7 +65,14 @@ def generate_default_output_path(ctx, param, value):
     callback=generate_default_output_path,
     help="Path where the processed EPUB will be saved. Defaults to input directory with '_bio' suffix.",
 )
-def cli(epub_path: Path, output_path: Path):
+@click.option(
+    "--no-inline-css",
+    "no_inline_css",
+    is_flag=True,
+    default=False,
+    help="Use external CSS stylesheet instead of inline styles. Default is False (inline CSS).",
+)
+def cli(epub_path: Path, output_path: Path, no_inline_css: bool):
     """Processes an EPUB file to apply bionic reading formatting to Chinese text."""
     console = Console()
 
@@ -78,7 +85,11 @@ def cli(epub_path: Path, output_path: Path):
     console.print("Loading NLP model...", style="yellow")
     chinese_analyzer = ChineseAnalyzer()
 
-    parser = EpubParser(str(epub_path))
+    # Convert no_inline_css flag to inline_css parameter
+    # no_inline_css=True means use external CSS (inline_css=False)
+    # no_inline_css=False means use inline CSS (inline_css=True)
+    inline_css = not no_inline_css
+    parser = EpubParser(str(epub_path), inline_css=inline_css)
     doc_count = parser.get_document_count()
 
     with Progress(

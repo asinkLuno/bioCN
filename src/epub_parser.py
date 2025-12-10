@@ -8,15 +8,17 @@ class EpubParser:
     A parser for EPUB files to extract and analyze text content with SVO markup.
     """
 
-    def __init__(self, file_path: str):
+    def __init__(self, file_path: str, inline_css: bool = True):
         """
         Initializes the parser with the path to the EPUB file.
 
         Args:
             file_path: The path to the EPUB file.
+            inline_css: Whether to use inline CSS styles. Default True for better compatibility.
         """
         self.file_path = file_path
         self.book = epub.read_epub(self.file_path)
+        self.inline_css = inline_css
 
     def get_document_count(self) -> int:
         """
@@ -40,8 +42,9 @@ class EpubParser:
             progress: The rich progress bar object.
             task: The rich progress bar task ID.
         """
-        # Inject CSS stylesheet first
-        self._inject_css_stylesheet()
+        # Inject CSS stylesheet first if using external CSS
+        if not self.inline_css:
+            self._inject_css_stylesheet()
 
         for item in list(self.book.get_items_of_type(ebooklib.ITEM_DOCUMENT)):
             soup = BeautifulSoup(item.get_content(), "html.parser")
@@ -126,27 +129,35 @@ class EpubParser:
 
     def _mark_svo_in_soup(self, soup: BeautifulSoup, sentence_svos: dict) -> None:
         """
-        Marks SVO structures in the BeautifulSoup object using CSS classes.
+        Marks SVO structures in the BeautifulSoup object using either inline styles or CSS classes.
 
         Args:
             soup: The BeautifulSoup object to modify.
             sentence_svos: Dictionary mapping sentences to their SVO structures.
         """
-        css_classes = {
-            "subject": "svo-subject",
-            "predicate": "svo-predicate",
-            "object": "svo-object",
-        }
+        # Use inline styles or CSS classes based on inline_css flag
+        if self.inline_css:
+            styles = {
+                "subject": 'style="color: #D95F02; font-weight: bold;"',
+                "predicate": 'style="color: #1B9E77; font-weight: bold;"',
+                "object": 'style="color: #7570B3; font-weight: bold;"',
+            }
+        else:
+            styles = {
+                "subject": 'class="svo-subject"',
+                "predicate": 'class="svo-predicate"',
+                "object": 'class="svo-object"',
+            }
 
         for sentence, svo_list in sentence_svos.items():
             for svo in svo_list:
-                for component, css_class in css_classes.items():
+                for component, style_attr in styles.items():
                     if svo[component]:
                         text = svo[component]
                         for element in soup.find_all(string=True):
                             if text in element:
                                 new_text = element.replace(
-                                    text, f'<span class="{css_class}">{text}</span>'
+                                    text, f"<span {style_attr}>{text}</span>"
                                 )
                                 element.replace_with(
                                     BeautifulSoup(new_text, "html.parser")
