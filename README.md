@@ -52,6 +52,12 @@ biocn --input-path your-book.epub
 
 # 指定输出路径
 biocn --input-path your-book.epub --output-path processed-book.epub
+
+# 使用关键词提取模式
+biocn --input-path your-book.epub --mode keywords --method keybert
+
+# 使用不同的关键词提取方法
+biocn --input-path your-book.epub --mode keywords --method textrank
 ```
 
 ### uv 开发环境使用
@@ -62,11 +68,27 @@ uv run biocn --input-path your-book.epub
 
 # 或者使用模块方式
 uv run python -m src.cli --input-path your-book.epub
+
+# 使用关键词提取模式
+uv run biocn --input-path your-book.epub --mode keywords --method yake
 ```
 
 ### 输出规则
 
 如果不指定 `--output-path`，工具会在输入文件同目录下生成 `原文件名_bio.epub`。
+
+### 参数说明
+
+- **--input-path**: （必需）输入的 EPUB 文件路径
+- **--output-path**: （可选）输出文件路径，默认在输入文件同目录下生成 `原文件名_bio.epub`
+- **--mode**: （可选）分析模式
+  - `svo`: 主谓宾结构提取（默认）
+  - `keywords`: 关键词提取模式
+- **--method**: （可选）关键词提取方法（仅在 `--mode=keywords` 时有效）
+  - `tfidf`: TF-IDF 算法（默认）
+  - `keybert`: KeyBERT 算法
+  - `textrank`: TextRank 算法
+  - `yake`: YAKE 算法
 
 ### 示例
 
@@ -77,6 +99,9 @@ biocn --input-path 窄门.epub
 
 # uv 开发环境：
 uv run biocn --input-path tests/窄门.epub
+
+# 使用关键词提取模式处理
+biocn --input-path 窄门.epub --mode keywords --method keybert
 ```
 
 ## 技术原理
@@ -84,21 +109,35 @@ uv run biocn --input-path tests/窄门.epub
 ### 核心组件
 
 1. **EpubParser**：解析 EPUB 文件，提取文本内容
-2. **ChineseAnalyzer**：使用 HanLP 进行中文语法分析
+2. **ChineseAnalyzer**：支持多种文本分析模式
+   - SVO 分析：使用 HanLP 进行中文语法分析
+   - 关键词提取：支持 TF-IDF、KeyBERT、TextRank、YAKE 等算法
 3. **CLI 界面**：提供友好的命令行交互和进度显示
 
-### 语法分析
+### 文本分析模式
+
+#### 1. SVO 模式（默认）
 
 基于 HanLP 的语义角色标注（SRL）技术：
 - 自动识别句子中的主谓宾结构
 - 支持复杂句子的多谓语分析
 - 准确提取中文语法成分
 
-### 标记规则
-
+**标记规则**：
 - **主语**：`<span style="color: red; font-weight: bold;">文本</span>`
 - **谓语**：`<span style="color: blue; font-weight: bold;">文本</span>`
 - **宾语**：`<span style="color: green; font-weight: bold;">文本</span>`
+
+#### 2. 关键词模式
+
+支持多种关键词提取算法：
+- **TF-IDF**：基于词频和逆文档频率
+- **KeyBERT**：基于 BERT 的语义关键词提取
+- **TextRank**：基于图模型的文本排序算法
+- **YAKE**：无监督的关键词提取算法
+
+**标记规则**：
+- **关键词**：`<span style="color: purple; font-weight: bold;">文本</span>`
 
 ## 开发
 

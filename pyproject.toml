@@ -10,6 +10,7 @@ dependencies = [
     "beautifulsoup4",
     "hanlp>=2.1.3",
     "rich>=14.2.0",
+    "pke-zh>=0.2.6",
 ]
 
 [project.scripts]

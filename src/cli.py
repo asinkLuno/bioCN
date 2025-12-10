@@ -10,7 +10,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress
 
-from src.analyzer import ChineseAnalyzer
+from src.analyzer import AnalyzerFactory
 from src.epub_parser import EpubParser
 
 
@@ -65,20 +65,44 @@ def generate_default_output_path(ctx, param, value):
     callback=generate_default_output_path,
     help="Path where the processed EPUB will be saved. Defaults to input directory with '_bio' suffix.",
 )
-def cli(epub_path: Path, output_path: Path):
+@click.option(
+    "--mode",
+    "mode",
+    required=False,
+    default="svo",
+    type=click.Choice(["svo", "keywords"], case_sensitive=False),
+    help="Analysis mode: 'svo' for Subject-Verb-Object extraction (default), 'keywords' for keyword extraction.",
+)
+@click.option(
+    "--method",
+    "method",
+    required=False,
+    default="tfidf",
+    type=click.Choice(["tfidf", "keybert", "textrank", "yake"], case_sensitive=False),
+    help="Keyword extraction method (only used with --mode=keywords): 'tfidf' (default), 'keybert', 'textrank', or 'yake'.",
+)
+def cli(epub_path: Path, output_path: Path, mode: str, method: str):
     """Processes an EPUB file to apply bionic reading formatting to Chinese text."""
     console = Console()
 
     # Display header
     header = f"[bold cyan]Bionic Reading EPUB Processor[/bold cyan]\n\n"
     header += f"Input: [green]{epub_path}[/green]\n"
-    header += f"Output: [green]{output_path}[/green]"
+    header += f"Output: [green]{output_path}[/green]\n"
+    header += f"Mode: [cyan]{mode.upper()}[/cyan]"
+    if mode == "keywords":
+        header += f" | Method: [yellow]{method.upper()}[/yellow]"
     console.print(Panel(header, expand=False))
 
-    console.print("Loading NLP model...", style="yellow")
-    chinese_analyzer = ChineseAnalyzer()
+    # Create analyzer based on mode and method
+    console.print("Loading analyzer...", style="yellow")
+    try:
+        analyzer = AnalyzerFactory.create_analyzer(mode=mode, method=method)
+    except (ValueError, ImportError) as e:
+        console.print(f"[bold red]Error:[/bold red] {e}")
+        raise click.Abort()
 
-    parser = EpubParser(str(epub_path))
+    parser = EpubParser(str(epub_path), mode=mode)
     doc_count = parser.get_document_count()
 
     with Progress(
@@ -89,7 +113,7 @@ def cli(epub_path: Path, output_path: Path):
     ) as progress:
         task = progress.add_task("[b]Processing...[/b]", total=doc_count)
 
-        parser.parse_chinese(chinese_analyzer, progress, task)
+        parser.parse_text(analyzer, progress, task)
 
         # After processing, save the file
         console.print("Saving EPUB...", style="yellow")
