@@ -65,11 +65,17 @@ uv pip install --index-url https://download.pytorch.org/whl/cpu -e '.[dev]'
 ### pip 安装后使用
 
 ```bash
-# 处理 EPUB 文件（自动生成输出路径）
+# 处理 EPUB 文件（自动生成输出路径，默认使用内联CSS）
 biocn --input-path your-book.epub
 
 # 指定输出路径
 biocn --input-path your-book.epub --output-path processed-book.epub
+
+# 使用外部CSS样式表（推荐用于大文件）
+biocn --input-path your-book.epub --no-inline-css
+
+# 指定输出路径并使用外部CSS
+biocn --input-path your-book.epub --output-path processed-book.epub --no-inline-css
 ```
 
 ### uv 开发环境使用
@@ -78,13 +84,30 @@ biocn --input-path your-book.epub --output-path processed-book.epub
 # 处理 EPUB 文件
 uv run biocn --input-path your-book.epub
 
+# 使用外部CSS样式表
+uv run biocn --input-path your-book.epub --no-inline-css
+
 # 或者使用模块方式
 uv run python -m src.cli --input-path your-book.epub
+
+# 模块方式使用外部CSS
+uv run python -m src.cli --input-path your-book.epub --no-inline-css
 ```
 
 ### 输出规则
 
 如果不指定 `--output-path`，工具会在输入文件同目录下生成 `原文件名_bio.epub`。
+
+### CSS 样式选项
+
+工具提供两种 CSS 应用模式：
+
+- **内联样式（默认）**：每个 SVO 成分使用内联 `style` 属性，兼容性最好
+- **外部CSS（--no-inline-css）**：使用 CSS 类选择器，文件更小，性能更好
+
+**推荐选择**：
+- 小文件或追求最大兼容性：使用默认内联样式
+- 大文件或注重性能：使用 `--no-inline-css`
 
 ### 示例
 
@@ -93,8 +116,14 @@ uv run python -m src.cli --input-path your-book.epub
 # pip 安装后：
 biocn --input-path 故事新编.epub
 
+# 使用外部CSS处理大文件：
+biocn --input-path 故事新编.epub --no-inline-css
+
 # uv 开发环境：
 uv run biocn --input-path tests/故事新编.epub
+
+# uv 环境使用外部CSS：
+uv run biocn --input-path tests/故事新编.epub --no-inline-css
 ```
 
 ## 技术原理
@@ -114,9 +143,24 @@ uv run biocn --input-path tests/故事新编.epub
 
 ### 标记规则
 
+工具提供两种 CSS 标记模式：
+
+#### 内联样式模式（默认）
 - **主语**：`<span style="color: #D95F02; font-weight: bold;">文本</span>`
 - **谓语**：`<span style="color: #1B9E77; font-weight: bold;">文本</span>`
 - **宾语**：`<span style="color: #7570B3; font-weight: bold;">文本</span>`
+
+#### 外部CSS模式（--no-inline-css）
+- **主语**：`<span class="svo-subject">文本</span>`
+- **谓语**：`<span class="svo-predicate">文本</span>`
+- **宾语**：`<span class="svo-object">文本</span>`
+
+外部CSS模式会自动注入包含以下样式的CSS文件：
+```css
+.svo-subject { color: #D95F02; font-weight: bold; }
+.svo-predicate { color: #1B9E77; font-weight: bold; }
+.svo-object { color: #7570B3; font-weight: bold; }
+```
 
 ## 开发
 
@@ -178,20 +222,20 @@ bioCN/
 
 ## 遗留问题
 
-### 1. 大文件性能问题
+### 1. 大文件性能问题 ✅ 已部分解决
 
 **问题描述**：处理后的 EPUB 文件在某些阅读器中打开大文件时会明显卡顿。
 
-**根本原因**：当前 CSS 嵌入方式不够优化，每个处理的文本片段都包含了内联样式，导致：
+**根本原因**：默认的内联 CSS 嵌入方式导致 HTML 体积膨胀，增加了阅读器的渲染负担。
 
-- HTML 体积膨胀
-- 阅读器渲染压力大
-- 滚动和翻页响应慢
+**✅ 已实现解决方案**：
+- 新增 `--no-inline-css` 选项，使用外部 CSS 类选择器替代内联样式
+- 外部 CSS 模式显著减少文件大小，提升渲染性能
+- 为大文件处理推荐使用 `--no-inline-css` 模式
 
-**计划优化方案**：
-- 将样式集中到 CSS 文件中，通过 class 选择器应用
-- 减少内联样式的数量
+**后续优化方向**：
 - 考虑按章节分割处理，避免单文件过大
+- 优化 CSS 注入方式，进一步减少文件体积
 
 ### 2. 主谓宾提取算法准确性
 
