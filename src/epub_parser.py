@@ -135,6 +135,8 @@ class EpubParser:
             soup: The BeautifulSoup object to modify.
             sentence_svos: Dictionary mapping sentences to their SVO structures.
         """
+        import re
+
         # Use inline styles or CSS classes based on inline_css flag
         if self.inline_css:
             styles = {
@@ -149,16 +151,60 @@ class EpubParser:
                 "object": 'class="svo-object"',
             }
 
-        for sentence, svo_list in sentence_svos.items():
-            for svo in svo_list:
-                for component, style_attr in styles.items():
-                    if svo[component]:
+        # Collect all text nodes and their parents
+        text_nodes = []
+        for element in soup.find_all(string=True):
+            # Skip script, style tags
+            if element.parent.name in ["script", "style"]:
+                continue
+            text_nodes.append(element)
+
+        # Process each text node
+        for element in text_nodes:
+            element_text = str(element)
+            marked_positions = []  # Track what we've marked to avoid overlaps
+
+            # Collect all SVO components to mark in this text node
+            for sentence, svo_list in sentence_svos.items():
+                # Only process if this sentence appears in this text node
+                if sentence not in element_text:
+                    continue
+
+                for svo in svo_list:
+                    for component in ["subject", "predicate", "object"]:
+                        if not svo[component]:
+                            continue
+
                         text = svo[component]
-                        for element in soup.find_all(string=True):
-                            if text in element:
-                                new_text = element.replace(
-                                    text, f"<span {style_attr}>{text}</span>"
-                                )
-                                element.replace_with(
-                                    BeautifulSoup(new_text, "html.parser")
-                                )
+                        style_attr = styles[component]
+
+                        # Find all occurrences of this text (exact match)
+                        for match in re.finditer(re.escape(text), element_text):
+                            start, end = match.span()
+
+                            # Check for overlap with already marked positions
+                            if not self._has_overlap(start, end, marked_positions):
+                                marked_positions.append((start, end, style_attr))
+
+            # Apply markings from back to front to avoid index shifting
+            if marked_positions:
+                marked_positions.sort(reverse=True)
+                new_text = element_text
+
+                for start, end, style_attr in marked_positions:
+                    word = new_text[start:end]
+                    new_text = (
+                        new_text[:start]
+                        + f"<span {style_attr}>{word}</span>"
+                        + new_text[end:]
+                    )
+
+                # Replace the text node with the marked version
+                element.replace_with(BeautifulSoup(new_text, "html.parser"))
+
+    def _has_overlap(self, start, end, marked_positions):
+        """Check if a position overlaps with any already marked positions."""
+        for m_start, m_end, _ in marked_positions:
+            if not (end <= m_start or start >= m_end):
+                return True
+        return False
