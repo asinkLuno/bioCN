@@ -8,8 +8,14 @@ from typing import Dict, List
 import hanlp
 from hanlp.utils.rules import split_sentence
 
+try:
+    import torch
+except ImportError:
+    torch = None
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class ChineseAnalyzer:
@@ -19,46 +25,96 @@ class ChineseAnalyzer:
     """
 
     def __init__(self):
+        # Explicitly manage GPU/CPU device selection
+        if torch is not None and torch.cuda.is_available():
+            device = 0
+            logger.info("✓ Using GPU for acceleration")
+        else:
+            device = None
+            if torch is None:
+                logger.warning(
+                    "⚠ PyTorch not found - using CPU (will be significantly slower)"
+                )
+            else:
+                logger.warning("⚠ GPU not available - using CPU (will be slower)")
+
         # Using CLOSE_TOK_POS_NER_SRL_UDEP_SDP_CON_ELECTRA_SMALL_ZH for Universal Dependencies.
         self.hanlp = hanlp.load(
-            hanlp.pretrained.mtl.CLOSE_TOK_POS_NER_SRL_UDEP_SDP_CON_ELECTRA_SMALL_ZH
+            hanlp.pretrained.mtl.CLOSE_TOK_POS_NER_SRL_UDEP_SDP_CON_ELECTRA_SMALL_ZH,
+            devices=device,
         )
 
     def analyze(self, text: str) -> Dict[str, List[Dict[str, str]]]:
-        if not text:
-            return {}
+        """Analyze a single text. For multiple texts, use batch_analyze()."""
+        results = self.batch_analyze([text])
+        return results[0] if results else {}
 
-        sentences = list(split_sentence(text))
-        if not sentences:
-            return {}
+    def batch_analyze(self, texts: List[str]) -> List[Dict[str, List[Dict[str, str]]]]:
+        """
+        Batch analyze multiple texts - significantly faster on GPU than calling analyze() in a loop.
 
-        # Run all tasks in the pipeline. This is more efficient than looping.
-        docs = self.hanlp(sentences)
+        Args:
+            texts: List of text strings to analyze.
 
-        sentence_svos = {}
+        Returns:
+            List of dictionaries, each mapping sentences to their SVO structures.
+        """
+        if not texts:
+            return []
 
-        # The dependency parse tree is in doc['dep']
-        # The PoS tags are in doc['pos/ctb']
-        for i, sentence in enumerate(sentences):
-            sentence = sentence.strip()
-            deps = docs["dep"][i]
-            pos_tags = docs["pos/ctb"][i]
-            words = docs["tok/fine"][i]
+        # Collect all sentences from all texts, tracking boundaries
+        all_sentences = []
+        text_boundaries = [0]
 
-            svo_results = []
+        for text in texts:
+            if not text:
+                text_boundaries.append(text_boundaries[-1])
+                continue
 
-            # Find all predicates (not just VV - include VA, VC, VE)
-            predicates = self._find_predicates(words, pos_tags, deps)
+            sentences = list(split_sentence(text))
+            all_sentences.extend(sentences)
+            text_boundaries.append(len(all_sentences))
 
-            for verb_idx in predicates:
-                svo = self._extract_svo(verb_idx, deps, words, pos_tags)
-                if svo["subject"] or svo["predicate"] or svo["object"]:
-                    svo_results.append(svo)
+        # Single GPU call for all sentences - this is the key optimization
+        if not all_sentences:
+            return [{}] * len(texts)
 
-            if svo_results:
-                sentence_svos[sentence] = svo_results
+        docs = self.hanlp(all_sentences)
 
-        return sentence_svos
+        # Split results back by text boundaries
+        results = []
+        for i in range(len(texts)):
+            start, end = text_boundaries[i], text_boundaries[i + 1]
+
+            if start == end:  # Empty text
+                results.append({})
+                continue
+
+            # Extract SVO for this text's sentences
+            sentence_svos = {}
+            text_sentences = all_sentences[start:end]
+
+            for j, sentence in enumerate(text_sentences):
+                sentence = sentence.strip()
+                doc_idx = start + j
+                deps = docs["dep"][doc_idx]
+                pos_tags = docs["pos/ctb"][doc_idx]
+                words = docs["tok/fine"][doc_idx]
+
+                svo_results = []
+                predicates = self._find_predicates(words, pos_tags, deps)
+
+                for verb_idx in predicates:
+                    svo = self._extract_svo(verb_idx, deps, words, pos_tags)
+                    if svo["subject"] or svo["predicate"] or svo["object"]:
+                        svo_results.append(svo)
+
+                if svo_results:
+                    sentence_svos[sentence] = svo_results
+
+            results.append(sentence_svos)
+
+        return results
 
     def _find_predicates(self, words, pos_tags, deps):
         """Find all predicate indices. Support VV, VA, VC, VE."""

@@ -46,19 +46,35 @@ class EpubParser:
         if not self.inline_css:
             self._inject_css_stylesheet()
 
+        # Collect all paragraphs from all documents for batch processing
+        all_items = []
         for item in list(self.book.get_items_of_type(ebooklib.ITEM_DOCUMENT)):
             soup = BeautifulSoup(item.get_content(), "html.parser")
-
             paragraphs = soup.find_all("p")
+
+            # Collect non-empty paragraphs with their text
+            valid_paragraphs = []
             for p in paragraphs:
                 text = p.get_text()
-                if not text.strip():
-                    continue
+                if text.strip():
+                    valid_paragraphs.append((p, text))
 
-                sentence_svos = chinese_analyzer.analyze(text)
-                self._mark_svo_in_soup(p, sentence_svos)
+            all_items.append((item, soup, valid_paragraphs))
 
-            # Update the item content in the book
+        # Batch analyze all texts in one GPU call - key optimization for GPU utilization
+        all_texts = []
+        paragraph_items = []  # Store (p, soup, item) for each paragraph
+
+        for item, soup, valid_paragraphs in all_items:
+            for p, text in valid_paragraphs:
+                all_texts.append(text)
+                paragraph_items.append((p, soup, item))
+
+        all_svos = chinese_analyzer.batch_analyze(all_texts)
+
+        # Apply SVO markings - zip ensures 1-to-1 mapping and fails fast if lengths mismatch
+        for (p, soup, item), sentence_svos in zip(paragraph_items, all_svos):
+            self._mark_svo_in_soup(p, sentence_svos)
             item.set_content(str(soup).encode("utf-8"))
             progress.advance(task)
 
