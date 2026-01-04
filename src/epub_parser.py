@@ -50,13 +50,21 @@ class EpubParser:
             soup = BeautifulSoup(item.get_content(), "html.parser")
 
             paragraphs = soup.find_all("p")
+            valid_paragraphs = []
+            paragraph_texts = []
+
             for p in paragraphs:
                 text = p.get_text()
-                if not text.strip():
-                    continue
+                if text.strip():
+                    valid_paragraphs.append(p)
+                    paragraph_texts.append(text)
 
-                sentence_svos = chinese_analyzer.analyze(text)
-                self._mark_svo_in_soup(p, sentence_svos)
+            if paragraph_texts:
+                # Process all paragraphs in this document in a single batch
+                batch_results = chinese_analyzer.analyze_batch(paragraph_texts)
+
+                for p, sentence_svos in zip(valid_paragraphs, batch_results):
+                    self._mark_svo_in_soup(p, sentence_svos)
 
             # Update the item content in the book
             item.set_content(str(soup).encode("utf-8"))

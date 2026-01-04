@@ -35,15 +35,98 @@ class ChineseAnalyzer:
         # Run all tasks in the pipeline.
         docs = self.hanlp(sentences)
 
+        return self._extract_svo(sentences, docs)
+
+    def analyze_batch(self, texts: List[str]) -> List[Dict[str, List[Dict[str, str]]]]:
+        """
+        Analyze a batch of texts (e.g., paragraphs) for SVO structures.
+        Optimized for GPU utilization by processing all sentences in a single batch.
+        """
+        results = []
+        all_sentences = []
+        text_sentence_counts = []
+
+        # Pre-process: split all texts into sentences and flatten
+        for text in texts:
+            if not text:
+                text_sentence_counts.append(0)
+                continue
+            sents = list(split_sentence(text))
+            # Remove empty sentences if any
+            sents = [s for s in sents if s.strip()]
+
+            if not sents:
+                text_sentence_counts.append(0)
+                continue
+
+            all_sentences.extend(sents)
+            text_sentence_counts.append(len(sents))
+
+        if not all_sentences:
+            return [{} for _ in texts]
+
+        # Batch Inference
+        # HanLP handles batching internally.
+        docs = self.hanlp(all_sentences)
+
+        # Post-process: map back to original texts
+        current_idx = 0
+
+        # Check if docs is a dict of lists or list of dicts/docs
+        is_dict_format = isinstance(docs, dict)
+
+        for count in text_sentence_counts:
+            if count == 0:
+                results.append({})
+                continue
+
+            batch_sentences = all_sentences[current_idx : current_idx + count]
+
+            # Slice the docs for this batch
+            if is_dict_format:
+                # Assuming docs is a dictionary where values are lists aligned with input sentences
+                batch_docs = {}
+                for k, v in docs.items():
+                    if isinstance(v, (list, tuple)) and len(v) == len(all_sentences):
+                        batch_docs[k] = v[current_idx : current_idx + count]
+                    else:
+                        # For keys not aligned (e.g. version?), just copy?
+                        # Actually _extract_svo only needs 'dep', 'pos/ctb', 'tok/fine'
+                        pass
+            else:
+                # Assume list of docs
+                batch_docs = docs[current_idx : current_idx + count]
+
+            svos = self._extract_svo(batch_sentences, batch_docs)
+            results.append(svos)
+
+            current_idx += count
+
+        return results
+
+    def _extract_svo(
+        self, sentences: List[str], docs: Dict
+    ) -> Dict[str, List[Dict[str, str]]]:
+        """
+        Extract SVO structures from HanLP docs for a list of sentences.
+        """
         sentence_svos = {}
 
         # The dependency parse tree is in doc['dep']
         # The PoS tags are in doc['pos/ctb']
         for i, sentence in enumerate(sentences):
             sentence = sentence.strip()
-            deps = docs["dep"][i]
-            pos_tags = docs["pos/ctb"][i]
-            words = docs["tok/fine"][i]
+            # Handle cases where docs might be a list of dicts (Document) or dict of lists
+            if isinstance(docs, dict):
+                deps = docs["dep"][i]
+                pos_tags = docs["pos/ctb"][i]
+                words = docs["tok/fine"][i]
+            else:
+                # Assume Document object which behaves like a list of dicts for iteration?
+                # Or docs[i] is a dict for the sentence
+                deps = docs[i]["dep"]
+                pos_tags = docs[i]["pos/ctb"]
+                words = docs[i]["tok/fine"]
 
             # Helper to find children of a node with specific relations
             def get_children(head_idx: int, rels: List[str]) -> List[int]:
