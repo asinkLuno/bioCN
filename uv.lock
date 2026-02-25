@@ -68,6 +68,13 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "autoflake" },
+    { name = "isort" },
+    { name = "ruff" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "autoflake", marker = "extra == 'dev'", specifier = ">=2.3.1" },
@@ -83,6 +90,13 @@ requires-dist = [
     { name = "torch", specifier = ">=2.0.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "autoflake", specifier = ">=2.3.1" },
+    { name = "isort", specifier = ">=7.0.0" },
+    { name = "ruff", specifier = ">=0.14.8" },
+]
 
 [[package]]
 name = "certifi"
