@@ -1,6 +1,7 @@
 import ebooklib
 from bs4 import BeautifulSoup
 from ebooklib import epub
+from loguru import logger
 
 
 class EpubParser:
@@ -29,8 +30,7 @@ class EpubParser:
     def parse_chinese(
         self,
         chinese_analyzer: "ChineseAnalyzer",
-        progress: "Progress",
-        task: "TaskID",
+        progress_callback: callable = None,
     ) -> None:
         """
         Extracts and analyzes Chinese text from the EPUB file with SVO markup.
@@ -39,14 +39,14 @@ class EpubParser:
 
         Args:
             chinese_analyzer: The Chinese analyzer for SVO extraction.
-            progress: The rich progress bar object.
-            task: The rich progress bar task ID.
+            progress_callback: Optional callback function called after each document.
         """
         # Inject CSS stylesheet first if using external CSS
         if not self.inline_css:
             self._inject_css_stylesheet()
 
         for item in list(self.book.get_items_of_type(ebooklib.ITEM_DOCUMENT)):
+            logger.info(f"Processing document: {item.file_name}")
             soup = BeautifulSoup(item.get_content(), "html.parser")
 
             paragraphs = soup.find_all("p")
@@ -70,7 +70,8 @@ class EpubParser:
 
             # Update the item content in the book
             item.set_content(str(soup).encode("utf-8"))
-            progress.advance(task)
+            if progress_callback:
+                progress_callback()
 
     def save(self, output_path: str) -> None:
         """

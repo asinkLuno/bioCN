@@ -2,14 +2,11 @@
 Base text analyzer interface and Chinese analyzer implementation.
 """
 
-import logging
 from typing import Dict, List
 
 import hanlp
 from hanlp.utils.rules import split_sentence
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
+from loguru import logger
 
 
 class ChineseAnalyzer:
@@ -20,9 +17,11 @@ class ChineseAnalyzer:
 
     def __init__(self):
         # Using CLOSE_TOK_POS_NER_SRL_UDEP_SDP_CON_ELECTRA_SMALL_ZH for Universal Dependencies.
+        logger.info("Loading HanLP model...")
         self.hanlp = hanlp.load(
             hanlp.pretrained.mtl.CLOSE_TOK_POS_NER_SRL_UDEP_SDP_CON_ELECTRA_SMALL_ZH
         )
+        logger.success("HanLP model loaded.")
 
     def analyze(self, text: str) -> Dict[str, List[Dict[str, str]]]:
         if not text:
@@ -224,5 +223,8 @@ class ChineseAnalyzer:
 
             if svo_results:
                 sentence_svos[sentence] = svo_results
+                logger.debug(f"Sentence: {sentence}")
+                for result in svo_results:
+                    logger.debug(f"  [SVO] S={result['subject']} | V={result['predicate']} | O={result['object']}")
 
         return sentence_svos

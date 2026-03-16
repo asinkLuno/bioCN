@@ -6,9 +6,8 @@ Command-line interface for Bionic Reading EPUB processor.
 from pathlib import Path
 
 import click
-from rich.console import Console
-from rich.panel import Panel
-from rich.progress import Progress
+from loguru import logger
+from tqdm import tqdm
 
 from src.analyzer import ChineseAnalyzer
 from src.epub_parser import EpubParser
@@ -74,42 +73,35 @@ def generate_default_output_path(ctx, param, value):
 )
 def cli(epub_path: Path, output_path: Path, no_inline_css: bool):
     """Processes an EPUB file to apply bionic reading formatting to Chinese text."""
-    console = Console()
+    
+    # Configure loguru
+    logger.remove()
+    # Log to file with DEBUG level
+    logger.add("biocn.log", level="DEBUG", rotation="10 MB", compression="zip")
+    # Print to console with INFO level (integrated with tqdm)
+    logger.add(lambda msg: tqdm.write(msg, end=""), level="INFO", colorize=True)
 
-    # Display header
-    header = f"[bold cyan]Bionic Reading EPUB Processor[/bold cyan]\n\n"
-    header += f"Input: [green]{epub_path}[/green]\n"
-    header += f"Output: [green]{output_path}[/green]"
-    console.print(Panel(header, expand=False))
+    click.secho("\nBionic Reading EPUB Processor", fg="cyan", bold=True)
+    click.echo(f"Input: {epub_path}")
+    click.echo(f"Output: {output_path}\n")
 
-    console.print("Loading NLP model...", style="yellow")
+    # Analyzer will log its loading status via loguru
     chinese_analyzer = ChineseAnalyzer()
 
     # Convert no_inline_css flag to inline_css parameter
-    # no_inline_css=True means use external CSS (inline_css=False)
-    # no_inline_css=False means use inline CSS (inline_css=True)
     inline_css = not no_inline_css
     parser = EpubParser(str(epub_path), inline_css=inline_css)
     doc_count = parser.get_document_count()
 
-    with Progress(
-        transient=True,
-        redirect_stderr=False,
-        redirect_stdout=False,
-        console=console,
-    ) as progress:
-        task = progress.add_task("[b]Processing...[/b]", total=doc_count)
-
-        parser.parse_chinese(chinese_analyzer, progress, task)
+    with tqdm(total=doc_count, desc="Processing", unit="doc") as pbar:
+        parser.parse_chinese(chinese_analyzer, progress_callback=pbar.update)
 
         # After processing, save the file
-        console.print("Saving EPUB...", style="yellow")
+        click.secho("\nSaving EPUB...", fg="yellow")
         parser.save(str(output_path))
 
-    console.print(f"[bold green]✓[/bold green] Processing complete!")
-    console.print(
-        f"✓ [bold]Output saved to:[/bold] [link=file://{output_path}]{output_path}[/link]"
-    )
+    click.secho(f"\n✓ Processing complete!", fg="green", bold=True)
+    click.echo(f"✓ Output saved to: {output_path}")
 
 
 if __name__ == "__main__":
