@@ -106,19 +106,30 @@ class ChineseAnalyzer:
 
     def _get_phrase(self, tokens: List[str], dep: List, index: int, exclude_indices=None) -> str:
         """
-        Reconstruct a full phrase for a token by finding its descendants in the dependency tree.
+        Reconstruct a phrase for a token by finding its descendants in the dependency tree,
+        but exclude adverbial modifiers and other non-core components.
         """
         if exclude_indices is None:
             exclude_indices = set()
+        
+        # Relations to exclude from the phrase (adverbials, etc.)
+        # advmod: adverbial modifier
+        # amod: adjectival modifier
+        # nmod: noun modifier
+        # case: case markers (like '的')
+        # punct: punctuation
+        exclude_rels = {'advmod', 'amod', 'nmod', 'case', 'mark', 'advcl'}
         
         indices = {index}
         changed = True
         while changed:
             changed = False
             for i, (head, rel) in enumerate(dep):
+                base_rel = rel.split(':')[0]
                 if head - 1 in indices and i not in indices and i not in exclude_indices:
-                    indices.add(i)
-                    changed = True
+                    if base_rel not in exclude_rels:
+                        indices.add(i)
+                        changed = True
         
         sorted_indices = sorted(list(indices))
         # Filter out trailing/leading punctuation
@@ -186,7 +197,6 @@ class ChineseAnalyzer:
             svo_results = []
             for verb_idx, components in predicates.items():
                 # Cross-product of subjects and objects for this predicate
-                # If no subjects/objects found, we use an empty list marker
                 subjects = components['subjects'] if components['subjects'] else [-1]
                 objects = components['objects'] if components['objects'] else [-1]
                 
@@ -199,8 +209,10 @@ class ChineseAnalyzer:
 
                 for s_idx in subjects:
                     for o_idx in objects:
-                        subject_phrase = self._get_phrase(tokens, dep, s_idx) if s_idx != -1 else ""
-                        object_phrase = self._get_phrase(tokens, dep, o_idx) if o_idx != -1 else ""
+                        # User requested to remove adverbials/modifiers (状语)
+                        # We now only use the core token for subject and object
+                        subject_phrase = tokens[s_idx] if s_idx != -1 else ""
+                        object_phrase = tokens[o_idx] if o_idx != -1 else ""
                         
                         # Only add if we have at least a subject or an object
                         if subject_phrase or object_phrase:

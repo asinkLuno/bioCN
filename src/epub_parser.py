@@ -64,6 +64,8 @@ class EpubParser:
                 batch_results = chinese_analyzer.analyze_batch(paragraph_texts)
 
                 for p, sentence_svos in zip(valid_paragraphs, batch_results):
+                    # _mark_svo_in_soup expects a dict mapping sentence to its SVOs
+                    # but batch_results gives us the dict directly for that paragraph
                     self._mark_svo_in_soup(p, sentence_svos)
 
             # Update the item content in the book
@@ -135,13 +137,9 @@ class EpubParser:
                     # Update the item content
                     item.set_content(str(soup).encode("utf-8"))
 
-    def _mark_svo_in_soup(self, soup: BeautifulSoup, sentence_svos: dict) -> None:
+    def _mark_svo_in_soup(self, paragraph_soup: BeautifulSoup, sentence_svos: dict) -> None:
         """
-        Marks SVO structures in the BeautifulSoup object using either inline styles or CSS classes.
-
-        Args:
-            soup: The BeautifulSoup object to modify.
-            sentence_svos: Dictionary mapping sentences to their SVO structures.
+        Marks SVO structures in the specific paragraph BeautifulSoup object.
         """
         # Use inline styles or CSS classes based on inline_css flag
         if self.inline_css:
@@ -157,13 +155,15 @@ class EpubParser:
                 "object": 'class="svo-object"',
             }
 
+        # We assume sentence_svos contains only SVOs for THIS paragraph
         for sentence, svo_list in sentence_svos.items():
             for svo in svo_list:
                 for component, style_attr in styles.items():
                     if svo[component]:
                         text = svo[component]
-                        for element in soup.find_all(string=True):
-                            if text in element:
+                        # Only search within this paragraph's text elements
+                        for element in paragraph_soup.find_all(string=True):
+                            if text in element and sentence in element.parent.get_text():
                                 new_text = element.replace(
                                     text, f"<span {style_attr}>{text}</span>"
                                 )
