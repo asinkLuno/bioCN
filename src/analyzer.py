@@ -19,15 +19,16 @@ class ChineseAnalyzer:
         # Using CLOSE_TOK_POS_NER_SRL_UDEP_SDP_CON_ELECTRA_SMALL_ZH for Universal Dependencies.
         logger.info("Loading HanLP model...")
         import torch
+
         device = 0 if torch.cuda.is_available() else -1
         if device == 0:
             logger.info("Using GPU for acceleration.")
         else:
             logger.info("Using CPU for inference.")
-            
+
         self.hanlp = hanlp.load(
             hanlp.pretrained.mtl.CLOSE_TOK_POS_NER_SRL_UDEP_SDP_CON_ELECTRA_SMALL_ZH,
-            devices=device
+            devices=device,
         )
         logger.success("HanLP model loaded.")
 
@@ -41,7 +42,7 @@ class ChineseAnalyzer:
 
         # Only request necessary tasks to save time
         # Using a reasonable batch_size for small sets of sentences
-        docs = self.hanlp(sentences, tasks=['tok/fine', 'dep'], batch_size=32)
+        docs = self.hanlp(sentences, tasks=["tok/fine", "dep"], batch_size=32)
 
         return self._extract_svo(sentences, docs)
 
@@ -77,7 +78,7 @@ class ChineseAnalyzer:
         # HanLP handles batching internally.
         # Only request necessary tasks to save time.
         # Larger batch size for large sets of sentences
-        docs = self.hanlp(all_sentences, tasks=['tok/fine', 'dep'], batch_size=64)
+        docs = self.hanlp(all_sentences, tasks=["tok/fine", "dep"], batch_size=64)
 
         # Post-process: map back to original texts
         current_idx = 0
@@ -114,41 +115,47 @@ class ChineseAnalyzer:
 
         return results
 
-    def _get_phrase(self, tokens: List[str], dep: List, index: int, exclude_indices=None) -> str:
+    def _get_phrase(
+        self, tokens: List[str], dep: List, index: int, exclude_indices=None
+    ) -> str:
         """
         Reconstruct a phrase for a token by finding its descendants in the dependency tree,
         but exclude adverbial modifiers and other non-core components.
         """
         if exclude_indices is None:
             exclude_indices = set()
-        
+
         # Relations to exclude from the phrase (adverbials, etc.)
         # advmod: adverbial modifier
         # amod: adjectival modifier
         # nmod: noun modifier
         # case: case markers (like '的')
         # punct: punctuation
-        exclude_rels = {'advmod', 'amod', 'nmod', 'case', 'mark', 'advcl'}
-        
+        exclude_rels = {"advmod", "amod", "nmod", "case", "mark", "advcl"}
+
         indices = {index}
         changed = True
         while changed:
             changed = False
             for i, (head, rel) in enumerate(dep):
-                base_rel = rel.split(':')[0]
-                if head - 1 in indices and i not in indices and i not in exclude_indices:
+                base_rel = rel.split(":")[0]
+                if (
+                    head - 1 in indices
+                    and i not in indices
+                    and i not in exclude_indices
+                ):
                     if base_rel not in exclude_rels:
                         indices.add(i)
                         changed = True
-        
+
         sorted_indices = sorted(list(indices))
         # Filter out trailing/leading punctuation
-        punctuation = '。，？！；：\'"（）“”‘’'
+        punctuation = "。，？！；：'\"（）“”‘’"
         while sorted_indices and tokens[sorted_indices[-1]] in punctuation:
             sorted_indices.pop()
         while sorted_indices and tokens[sorted_indices[0]] in punctuation:
             sorted_indices.pop(0)
-            
+
         return "".join([tokens[i] for i in sorted_indices])
 
     def _extract_svo(
@@ -169,51 +176,53 @@ class ChineseAnalyzer:
                 continue
 
             if is_dict_format:
-                tokens = docs.get('tok/fine', docs.get('tok', [[]]))[i]
-                dep = docs.get('dep', [[]])[i]
+                tokens = docs.get("tok/fine", docs.get("tok", [[]]))[i]
+                dep = docs.get("dep", [[]])[i]
             else:
                 doc = docs[i]
-                tokens = doc.get('tok/fine', doc.get('tok', []))
-                dep = doc.get('dep', [])
+                tokens = doc.get("tok/fine", doc.get("tok", []))
+                dep = doc.get("dep", [])
 
             if not tokens or not dep:
                 continue
 
             # 1. Identify all potential predicates and their subjects/objects
             # A predicate is a token that acts as a head for nsubj or obj relations
-            predicates = {} # verb_idx -> {'subjects': [], 'objects': []}
-            
+            predicates = {}  # verb_idx -> {'subjects': [], 'objects': []}
+
             # UD relations for subjects and objects
-            subject_rels = {'nsubj', 'nsubjpass', 'csubj', 'csubjpass'}
-            object_rels = {'obj', 'dobj', 'iobj', 'ccomp', 'xcomp', 'attr'}
+            subject_rels = {"nsubj", "nsubjpass", "csubj", "csubjpass"}
+            object_rels = {"obj", "dobj", "iobj", "ccomp", "xcomp", "attr"}
 
             for idx, (head, rel) in enumerate(dep):
                 verb_idx = head - 1
                 if verb_idx < 0:
                     continue
-                
+
                 # Normalize relation (remove language-specific suffixes like :assmod)
-                base_rel = rel.split(':')[0]
-                
+                base_rel = rel.split(":")[0]
+
                 if base_rel in subject_rels:
                     if verb_idx not in predicates:
-                        predicates[verb_idx] = {'subjects': [], 'objects': []}
-                    predicates[verb_idx]['subjects'].append(idx)
+                        predicates[verb_idx] = {"subjects": [], "objects": []}
+                    predicates[verb_idx]["subjects"].append(idx)
                 elif base_rel in object_rels:
                     if verb_idx not in predicates:
-                        predicates[verb_idx] = {'subjects': [], 'objects': []}
-                    predicates[verb_idx]['objects'].append(idx)
-            
+                        predicates[verb_idx] = {"subjects": [], "objects": []}
+                    predicates[verb_idx]["objects"].append(idx)
+
             svo_results = []
             for verb_idx, components in predicates.items():
                 # Cross-product of subjects and objects for this predicate
-                subjects = components['subjects'] if components['subjects'] else [-1]
-                objects = components['objects'] if components['objects'] else [-1]
-                
+                subjects = components["subjects"] if components["subjects"] else [-1]
+                objects = components["objects"] if components["objects"] else [-1]
+
                 # For the predicate phrase, exclude descendants that are subjects or objects
-                exclude = set(components['subjects']) | set(components['objects'])
-                predicate_phrase = self._get_phrase(tokens, dep, verb_idx, exclude_indices=exclude)
-                
+                exclude = set(components["subjects"]) | set(components["objects"])
+                predicate_phrase = self._get_phrase(
+                    tokens, dep, verb_idx, exclude_indices=exclude
+                )
+
                 if not predicate_phrase:
                     continue
 
@@ -223,19 +232,23 @@ class ChineseAnalyzer:
                         # We now only use the core token for subject and object
                         subject_phrase = tokens[s_idx] if s_idx != -1 else ""
                         object_phrase = tokens[o_idx] if o_idx != -1 else ""
-                        
+
                         # Only add if we have at least a subject or an object
                         if subject_phrase or object_phrase:
-                            svo_results.append({
-                                "subject": subject_phrase,
-                                "predicate": predicate_phrase,
-                                "object": object_phrase
-                            })
+                            svo_results.append(
+                                {
+                                    "subject": subject_phrase,
+                                    "predicate": predicate_phrase,
+                                    "object": object_phrase,
+                                }
+                            )
 
             if svo_results:
                 sentence_svos[sentence] = svo_results
                 logger.debug(f"Sentence: {sentence}")
                 for result in svo_results:
-                    logger.debug(f"  [SVO] S={result['subject']} | V={result['predicate']} | O={result['object']}")
+                    logger.debug(
+                        f"  [SVO] S={result['subject']} | V={result['predicate']} | O={result['object']}"
+                    )
 
         return sentence_svos

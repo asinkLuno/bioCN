@@ -1,7 +1,14 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import ebooklib
 from bs4 import BeautifulSoup
 from ebooklib import epub
 from loguru import logger
+
+if TYPE_CHECKING:
+    from src.analyzer import ChineseAnalyzer
 
 
 class EpubParser:
@@ -46,11 +53,11 @@ class EpubParser:
             self._inject_css_stylesheet()
 
         documents = list(self.book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
-        all_docs_data = [] # List of (item, soup, valid_paragraphs, texts)
+        all_docs_data = []  # List of (item, soup, valid_paragraphs, texts)
 
         logger.info("Gathering all paragraphs for batch processing...")
         all_flattened_texts = []
-        
+
         for item in documents:
             soup = BeautifulSoup(item.get_content(), "html.parser")
             paragraphs = soup.find_all("p")
@@ -62,7 +69,7 @@ class EpubParser:
                 if text.strip():
                     valid_paragraphs.append(p)
                     paragraph_texts.append(text)
-            
+
             all_docs_data.append((item, soup, valid_paragraphs, paragraph_texts))
             all_flattened_texts.extend(paragraph_texts)
 
@@ -80,7 +87,7 @@ class EpubParser:
                     sentence_svos = all_results[result_idx]
                     self._mark_svo_in_soup(p, sentence_svos)
                     result_idx += 1
-                
+
                 # Update the item content in the book
                 item.set_content(str(soup).encode("utf-8"))
                 if progress_callback:
@@ -153,7 +160,9 @@ class EpubParser:
                     # Update the item content
                     item.set_content(str(soup).encode("utf-8"))
 
-    def _mark_svo_in_soup(self, paragraph_soup: BeautifulSoup, sentence_svos: dict) -> None:
+    def _mark_svo_in_soup(
+        self, paragraph_soup: BeautifulSoup, sentence_svos: dict
+    ) -> None:
         """
         Marks SVO structures in the specific paragraph BeautifulSoup object.
         """
@@ -179,7 +188,10 @@ class EpubParser:
                         text = svo[component]
                         # Only search within this paragraph's text elements
                         for element in paragraph_soup.find_all(string=True):
-                            if text in element and sentence in element.parent.get_text():
+                            if (
+                                text in element
+                                and sentence in element.parent.get_text()
+                            ):
                                 new_text = element.replace(
                                     text, f"<span {style_attr}>{text}</span>"
                                 )

@@ -10,14 +10,14 @@ repos:
     rev: v2.13
     hooks:
       - id: vulture
-        args: ["aink/", "--min-confidence", "80", "--exclude", ".venv"]
+        args: ["src/", "--min-confidence", "80", "--exclude", ".venv"]
         pass_filenames: false
 
   - repo: local
     hooks:
       - id: radon
         name: radon
-        entry: radon cc aink/ --min=B
+        entry: radon cc src/ --min=B
         language: system
         pass_filenames: false
 

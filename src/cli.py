@@ -13,7 +13,7 @@ from src.analyzer import ChineseAnalyzer
 from src.epub_parser import EpubParser
 
 
-def validate_epub_path(ctx, param, value):
+def validate_epub_path(ctx, _param, value):
     """Validate EPUB file path - no silent failures."""
     path = Path(value)
 
@@ -29,7 +29,7 @@ def validate_epub_path(ctx, param, value):
     return path
 
 
-def generate_default_output_path(ctx, param, value):
+def generate_default_output_path(ctx, _param, value):
     """Generate default output path based on input path if not provided."""
     if value is not None:
         return Path(value)
@@ -73,7 +73,7 @@ def generate_default_output_path(ctx, param, value):
 )
 def cli(epub_path: Path, output_path: Path, no_inline_css: bool):
     """Processes an EPUB file to apply bionic reading formatting to Chinese text."""
-    
+
     # Configure loguru
     logger.remove()
     # Log to file with DEBUG level
@@ -100,7 +100,7 @@ def cli(epub_path: Path, output_path: Path, no_inline_css: bool):
         click.secho("\nSaving EPUB...", fg="yellow")
         parser.save(str(output_path))
 
-    click.secho(f"\n✓ Processing complete!", fg="green", bold=True)
+    click.secho("\n✓ Processing complete!", fg="green", bold=True)
     click.echo(f"✓ Output saved to: {output_path}")
 
 
