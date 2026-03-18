@@ -45,10 +45,14 @@ class EpubParser:
         if not self.inline_css:
             self._inject_css_stylesheet()
 
-        for item in list(self.book.get_items_of_type(ebooklib.ITEM_DOCUMENT)):
-            logger.info(f"Processing document: {item.file_name}")
-            soup = BeautifulSoup(item.get_content(), "html.parser")
+        documents = list(self.book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
+        all_docs_data = [] # List of (item, soup, valid_paragraphs, texts)
 
+        logger.info("Gathering all paragraphs for batch processing...")
+        all_flattened_texts = []
+        
+        for item in documents:
+            soup = BeautifulSoup(item.get_content(), "html.parser")
             paragraphs = soup.find_all("p")
             valid_paragraphs = []
             paragraph_texts = []
@@ -58,20 +62,31 @@ class EpubParser:
                 if text.strip():
                     valid_paragraphs.append(p)
                     paragraph_texts.append(text)
+            
+            all_docs_data.append((item, soup, valid_paragraphs, paragraph_texts))
+            all_flattened_texts.extend(paragraph_texts)
 
-            if paragraph_texts:
-                # Process all paragraphs in this document in a single batch
-                batch_results = chinese_analyzer.analyze_batch(paragraph_texts)
+        if all_flattened_texts:
+            logger.info(f"Total paragraphs to process: {len(all_flattened_texts)}")
+            # Process ALL paragraphs from ALL documents in one large batch
+            # This is the most efficient way for GPU utilization
+            all_results = chinese_analyzer.analyze_batch(all_flattened_texts)
 
-                for p, sentence_svos in zip(valid_paragraphs, batch_results):
-                    # _mark_svo_in_soup expects a dict mapping sentence to its SVOs
-                    # but batch_results gives us the dict directly for that paragraph
+            # Unflatten and apply results
+            result_idx = 0
+            for item, soup, valid_paragraphs, paragraph_texts in all_docs_data:
+                logger.info(f"Applying results to document: {item.file_name}")
+                for p in valid_paragraphs:
+                    sentence_svos = all_results[result_idx]
                     self._mark_svo_in_soup(p, sentence_svos)
-
-            # Update the item content in the book
-            item.set_content(str(soup).encode("utf-8"))
-            if progress_callback:
-                progress_callback()
+                    result_idx += 1
+                
+                # Update the item content in the book
+                item.set_content(str(soup).encode("utf-8"))
+                if progress_callback:
+                    progress_callback()
+        else:
+            logger.warning("No Chinese text found in documents.")
 
     def save(self, output_path: str) -> None:
         """

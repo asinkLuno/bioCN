@@ -18,8 +18,16 @@ class ChineseAnalyzer:
     def __init__(self):
         # Using CLOSE_TOK_POS_NER_SRL_UDEP_SDP_CON_ELECTRA_SMALL_ZH for Universal Dependencies.
         logger.info("Loading HanLP model...")
+        import torch
+        device = 0 if torch.cuda.is_available() else -1
+        if device == 0:
+            logger.info("Using GPU for acceleration.")
+        else:
+            logger.info("Using CPU for inference.")
+            
         self.hanlp = hanlp.load(
-            hanlp.pretrained.mtl.CLOSE_TOK_POS_NER_SRL_UDEP_SDP_CON_ELECTRA_SMALL_ZH
+            hanlp.pretrained.mtl.CLOSE_TOK_POS_NER_SRL_UDEP_SDP_CON_ELECTRA_SMALL_ZH,
+            devices=device
         )
         logger.success("HanLP model loaded.")
 
@@ -31,8 +39,9 @@ class ChineseAnalyzer:
         if not sentences:
             return {}
 
-        # Run all tasks in the pipeline.
-        docs = self.hanlp(sentences)
+        # Only request necessary tasks to save time
+        # Using a reasonable batch_size for small sets of sentences
+        docs = self.hanlp(sentences, tasks=['tok/fine', 'dep'], batch_size=32)
 
         return self._extract_svo(sentences, docs)
 
@@ -66,7 +75,9 @@ class ChineseAnalyzer:
 
         # Batch Inference
         # HanLP handles batching internally.
-        docs = self.hanlp(all_sentences)
+        # Only request necessary tasks to save time.
+        # Larger batch size for large sets of sentences
+        docs = self.hanlp(all_sentences, tasks=['tok/fine', 'dep'], batch_size=64)
 
         # Post-process: map back to original texts
         current_idx = 0
