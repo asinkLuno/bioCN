@@ -30,7 +30,7 @@ def get_analyzer() -> ChineseAnalyzer:
 @app.post("/process")
 async def process_epub(
     file: UploadFile = File(..., description="EPUB file to process"),
-    inline_css: bool = True,
+    inline_css: bool = False,
 ) -> FileResponse:
     """
     Process an EPUB file with bionic reading formatting.
