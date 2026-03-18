@@ -15,6 +15,15 @@ repos:
 
   - repo: local
     hooks:
+      - id: basedpyright
+        name: basedpyright
+        entry: basedpyright
+        args: ["--level", "error"]
+        language: system
+        types: [python]
+
+  - repo: local
+    hooks:
       - id: radon
         name: radon
         entry: radon cc src/ --min=B

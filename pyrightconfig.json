@@ -1,0 +1,19 @@
+{
+    "include": ["src"],
+    "exclude": ["**/__pycache__"],
+    "pythonVersion": "3.11",
+    "reportMissingTypeStubs": false,
+    "reportUnknownMemberType": false,
+    "reportUnknownVariableType": false,
+    "reportUnknownArgumentType": false,
+    "reportUnknownParameterType": false,
+    "reportMissingTypeArgument": false,
+    "reportOptionalMemberAccess": false,
+    "reportDeprecated": false,
+    "reportUnannotatedClassAttribute": false,
+    "reportUnusedCallResult": false,
+    "reportAttributeAccessIssue": false,
+    "reportGeneralTypeIssues": false,
+    "reportUnusedParameter": false,
+    "reportUnnecessaryIsInstance": false
+}
