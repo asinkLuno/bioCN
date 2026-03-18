@@ -27,6 +27,26 @@ class EpubParser:
         self.file_path = file_path
         self.book = epub.read_epub(self.file_path)
         self.inline_css = inline_css
+        self._fix_missing_toc_uids()
+
+    def _fix_missing_toc_uids(self) -> None:
+        """
+        Fixes TOC entries with missing uid by generating unique IDs.
+
+        Some EPUB files have TOC entries without uid, which causes write_epub
+        to fail when generating NCX. This ensures all TOC entries have valid uid.
+        """
+        if not self.book.toc:
+            return
+
+        def generate_uid(base: str, index: int) -> str:
+            return f"{base}_{index}"
+
+        # Handle flat list of Links
+        if all(hasattr(item, "uid") for item in self.book.toc):
+            for index, item in enumerate(self.book.toc):
+                if item.uid is None:
+                    item.uid = generate_uid("toc", index)
 
     def get_document_count(self) -> int:
         """
