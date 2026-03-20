@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 from src.analyzer import ChineseAnalyzer
 from src.epub_parser import EpubParser
@@ -59,12 +60,11 @@ async def process_epub(
             path=output_path,
             media_type="application/epub+zip",
             filename=f"bio_{file.filename}",
-            background=None,  # Don't delete file immediately
+            background=BackgroundTask(output_path.unlink, missing_ok=True),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # Cleanup input temp file
         input_path.unlink(missing_ok=True)
 
 
