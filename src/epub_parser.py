@@ -3,12 +3,18 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import ebooklib
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
 from ebooklib import epub
 from loguru import logger
 
 if TYPE_CHECKING:
     from src.analyzer import ChineseAnalyzer
+
+_ROLE_INLINE_STYLE = {
+    "subject": "color: #D95F02; font-weight: bold;",
+    "predicate": "color: #1B9E77; font-weight: bold;",
+    "object": "color: #7570B3; font-weight: bold;",
+}
 
 
 class EpubParser:
@@ -42,7 +48,6 @@ class EpubParser:
         def generate_uid(base: str, index: int) -> str:
             return f"{base}_{index}"
 
-        # Handle flat list of Links
         if all(hasattr(item, "uid") for item in self.book.toc):
             for index, item in enumerate(self.book.toc):
                 if item.uid is None:
@@ -60,24 +65,22 @@ class EpubParser:
         progress_callback: callable = None,
     ) -> None:
         """
-        Extracts and analyzes Chinese text from the EPUB file with SVO markup.
-        Marks subjects (blue bold), predicates (underline), objects (green bold).
-        Modifies the book object in-place.
+        Extracts and annotates Chinese text from the EPUB file with SVO markup.
+        Marks subjects (orange bold), predicates (green bold), objects (purple bold).
+        Modifies the book object in-place. Drops inline tags inside <p>.
 
         Args:
-            chinese_analyzer: The Chinese analyzer for SVO extraction.
+            chinese_analyzer: The Chinese analyzer for SVO annotation.
             progress_callback: Optional callback function called after each document.
         """
-        # Inject CSS stylesheet first if using external CSS
         if not self.inline_css:
             self._inject_css_stylesheet()
 
         documents = list(self.book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
-        all_docs_data = []  # List of (item, soup, valid_paragraphs, texts)
+        all_docs_data = []
+        all_flattened_texts: list[str] = []
 
         logger.info("Gathering all paragraphs for batch processing...")
-        all_flattened_texts = []
-
         for item in documents:
             soup = BeautifulSoup(item.get_content(), "html.parser")
             paragraphs = soup.find_all("p")
@@ -90,30 +93,25 @@ class EpubParser:
                     valid_paragraphs.append(p)
                     paragraph_texts.append(text)
 
-            all_docs_data.append((item, soup, valid_paragraphs, paragraph_texts))
+            all_docs_data.append((item, soup, valid_paragraphs))
             all_flattened_texts.extend(paragraph_texts)
 
-        if all_flattened_texts:
-            logger.info(f"Total paragraphs to process: {len(all_flattened_texts)}")
-            # Process ALL paragraphs from ALL documents in one large batch
-            # This is the most efficient way for GPU utilization
-            all_results = chinese_analyzer.analyze_batch(all_flattened_texts)
-
-            # Unflatten and apply results
-            result_idx = 0
-            for item, soup, valid_paragraphs, paragraph_texts in all_docs_data:
-                logger.info(f"Applying results to document: {item.file_name}")
-                for p in valid_paragraphs:
-                    sentence_svos = all_results[result_idx]
-                    self._mark_svo_in_soup(p, sentence_svos)
-                    result_idx += 1
-
-                # Update the item content in the book
-                item.set_content(str(soup).encode("utf-8"))
-                if progress_callback:
-                    progress_callback()
-        else:
+        if not all_flattened_texts:
             logger.warning("No Chinese text found in documents.")
+            return
+
+        logger.info(f"Total paragraphs to process: {len(all_flattened_texts)}")
+        all_segments = chinese_analyzer.annotate_batch(all_flattened_texts)
+
+        result_idx = 0
+        for item, soup, valid_paragraphs in all_docs_data:
+            logger.info(f"Applying results to document: {item.file_name}")
+            for p in valid_paragraphs:
+                self._rebuild_paragraph(p, all_segments[result_idx], soup)
+                result_idx += 1
+            item.set_content(str(soup).encode("utf-8"))
+            if progress_callback:
+                progress_callback()
 
     def save(self, output_path: str) -> None:
         """
@@ -147,7 +145,6 @@ class EpubParser:
 }
 """
 
-        # Create a new CSS item
         css_item = epub.EpubItem(
             uid="svo-styles",
             file_name="style/svo-styles.css",
@@ -155,20 +152,15 @@ class EpubParser:
             content=css_content,
         )
 
-        # Add the CSS item to the book
         self.book.add_item(css_item)
 
-        # Link the CSS to all HTML documents
         for item in self.book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
             soup = BeautifulSoup(item.get_content(), "html.parser")
 
-            # Check if CSS is already linked
             existing_link = soup.find("link", href="style/svo-styles.css")
             if not existing_link:
-                # Find the head element
                 head = soup.find("head")
                 if head:
-                    # Create and append the link element
                     link_tag = soup.new_tag(
                         "link",
                         rel="stylesheet",
@@ -176,45 +168,24 @@ class EpubParser:
                         href="style/svo-styles.css",
                     )
                     head.append(link_tag)
-
-                    # Update the item content
                     item.set_content(str(soup).encode("utf-8"))
 
-    def _mark_svo_in_soup(
-        self, paragraph_soup: BeautifulSoup, sentence_svos: dict
-    ) -> None:
-        """
-        Marks SVO structures in the specific paragraph BeautifulSoup object.
-        """
-        # Use inline styles or CSS classes based on inline_css flag
-        if self.inline_css:
-            styles = {
-                "subject": 'style="color: #D95F02; font-weight: bold;"',
-                "predicate": 'style="color: #1B9E77; font-weight: bold;"',
-                "object": 'style="color: #7570B3; font-weight: bold;"',
-            }
-        else:
-            styles = {
-                "subject": 'class="svo-subject"',
-                "predicate": 'class="svo-predicate"',
-                "object": 'class="svo-object"',
-            }
-
-        # We assume sentence_svos contains only SVOs for THIS paragraph
-        for sentence, svo_list in sentence_svos.items():
-            for svo in svo_list:
-                for component, style_attr in styles.items():
-                    if svo[component]:
-                        text = svo[component]
-                        # Only search within this paragraph's text elements
-                        for element in paragraph_soup.find_all(string=True):
-                            if (
-                                text in element
-                                and sentence in element.parent.get_text()
-                            ):
-                                new_text = element.replace(
-                                    text, f"<span {style_attr}>{text}</span>"
-                                )
-                                element.replace_with(
-                                    BeautifulSoup(new_text, "html.parser")
-                                )
+    def _rebuild_paragraph(self, p, segments: list[dict], soup: BeautifulSoup) -> None:
+        """Replace <p> content with segments, wrapping non-normal roles in <span>.
+        Inline tags inside <p> are dropped."""
+        p.clear()
+        for seg in segments:
+            role = seg["role"]
+            text = seg["text"]
+            if not text:
+                continue
+            if role == "normal":
+                p.append(NavigableString(text))
+                continue
+            span = soup.new_tag("span")
+            if self.inline_css:
+                span["style"] = _ROLE_INLINE_STYLE[role]
+            else:
+                span["class"] = f"svo-{role}"
+            span.string = text
+            p.append(span)
