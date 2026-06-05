@@ -36,22 +36,25 @@ class EpubParser:
         self._fix_missing_toc_uids()
 
     def _fix_missing_toc_uids(self) -> None:
-        """
-        Fixes TOC entries with missing uid by generating unique IDs.
-
-        Some EPUB files have TOC entries without uid, which causes write_epub
-        to fail when generating NCX. This ensures all TOC entries have valid uid.
-        """
         if not self.book.toc:
             return
 
-        def generate_uid(base: str, index: int) -> str:
-            return f"{base}_{index}"
+        counter = 0
 
-        if all(hasattr(item, "uid") for item in self.book.toc):
-            for index, item in enumerate(self.book.toc):
-                if item.uid is None:
-                    item.uid = generate_uid("toc", index)
+        def fix_items(items):
+            nonlocal counter
+            for item in items:
+                if isinstance(item, (tuple, list)):
+                    section, children = item[0], item[1]
+                    if hasattr(section, "uid") and section.uid is None:
+                        section.uid = f"toc_{counter}"
+                        counter += 1
+                    fix_items(children)
+                elif hasattr(item, "uid") and item.uid is None:
+                    item.uid = f"toc_{counter}"
+                    counter += 1
+
+        fix_items(self.book.toc)
 
     def get_document_count(self) -> int:
         """
