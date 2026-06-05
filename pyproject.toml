@@ -3,13 +3,12 @@ name = "biocn"
 version = "0.1.0"
 description = "Chinese bionic reading EPUB processor with HanLP grammar analysis"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = [
     "click",
     "ebooklib",
     "beautifulsoup4",
     "hanlp>=2.1.3",
-    "torch>=2.0.0",
     "tqdm>=4.67.1",
     "loguru>=0.7.3",
     "fastapi>=0.100.0",
@@ -44,6 +43,8 @@ dev = [
 ]
 
 [project.optional-dependencies]
+gpu = ["torch>=2.0.0"]
+cpu = ["torch>=2.0.0"]
 dev = [
     "autoflake>=2.3.1",
     "autopep8>=2.3.2",

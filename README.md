@@ -12,24 +12,18 @@ bioCN 是一个为中文 EPUB 电子书增强阅读体验的工具。它通过�
 
 ### 前置要求
 
-- Python 3.10+
+- Python 3.13+
 
 ### 1. 使用 pip 安装
 
 这种方式会将 `bioCN` 安装为命令行工具，适合直接使用。
 
-#### GPU 环境 (默认)
-
 ```bash
-# pip 会自动安装 torch，并优先使用 GPU 版本（如果环境支持）
-pip install git+https://github.com/asinkLuno/bioCN.git
-```
+# GPU 环境（默认，安装含 CUDA 的 torch）
+pip install git+https://github.com/asinkLuno/bioCN.git[gpu]
 
-#### 纯 CPU 环境
-
-```bash
-# 通过指定 Pytorch 的 CPU-only 索引来强制安装纯 CPU 版本
-pip install --index-url https://download.pytorch.org/whl/cpu git+https://github.com/asinkLuno/bioCN.git
+# 纯 CPU 环境
+pip install --index-url https://download.pytorch.org/whl/cpu git+https://github.com/asinkLuno/bioCN.git[cpu]
 ```
 
 ### 2. 使用 uv 开发安装
@@ -45,24 +39,18 @@ cd bioCN
 
 **然后**，根据您的环境选择对应的命令安装依赖：
 
-#### GPU 环境 (默认)
-
 ```bash
-# 安装基础依赖
-uv pip install -e .
+# GPU 环境（默认，安装含 CUDA 的 torch）
+uv sync --extra gpu
 
-# 安装基础依赖 + 开发依赖
-uv pip install -e '.[dev]'
-```
+# GPU 环境 + 开发依赖
+uv sync --extra gpu --extra dev
 
-#### 纯 CPU 环境
+# 纯 CPU 环境
+uv sync --extra cpu --index-url https://download.pytorch.org/whl/cpu
 
-```bash
-# 安装基础依赖
-uv pip install --index-url https://download.pytorch.org/whl/cpu -e .
-
-# 安装基础依赖 + 开发依赖
-uv pip install --index-url https://download.pytorch.org/whl/cpu -e '.[dev]'
+# 纯 CPU 环境 + 开发依赖
+uv sync --extra cpu --extra dev --index-url https://download.pytorch.org/whl/cpu
 ```
 
 ## 使用方法
