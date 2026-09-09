@@ -10,6 +10,25 @@ repos:
 
   - repo: local
     hooks:
+      - id: ruff-check
+        name: ruff (lint)
+        entry: uv run ruff check
+        args: [--fix]
+        language: system
+        types: [python]
+
+      - id: basedpyright
+        name: basedpyright (type check)
+        entry: uv run basedpyright --level error
+        language: system
+        pass_filenames: false
+
+      - id: radon
+        name: "radon (complexity gate: fail on B+)"
+        entry: bash -c 'out="$(uv run radon cc src --min=B --show-complexity 2>&1)"; if [ -n "$out" ]; then echo "$out"; exit 1; fi'
+        language: system
+        pass_filenames: false
+
       - id: mdformat
         name: mdformat
         entry: mdformat
