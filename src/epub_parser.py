@@ -17,6 +17,54 @@ _ROLE_INLINE_STYLE = {
 }
 
 
+def _collect_paragraphs(documents):
+    """Return (docs_data, texts): per-doc non-empty <p> nodes plus their
+    flattened text, in document order."""
+    docs_data = []
+    texts: list[str] = []
+    for item in documents:
+        soup = BeautifulSoup(item.get_content(), "html.parser")
+        valid = []
+        for p in soup.find_all("p"):
+            text = p.get_text()
+            if text.strip():
+                valid.append(p)
+                texts.append(text)
+        docs_data.append((item, soup, valid))
+    return docs_data, texts
+
+
+def _apply_segments(docs_data, segments, progress_callback) -> None:
+    """Rewrite each collected <p> with its annotated segments in place."""
+    idx = 0
+    for item, soup, paragraphs in docs_data:
+        logger.info(f"Applying results to document: {item.file_name}")
+        for p in paragraphs:
+            _rebuild_paragraph(p, segments[idx], soup)
+            idx += 1
+        item.set_content(str(soup).encode("utf-8"))
+        if progress_callback:
+            progress_callback()
+
+
+def _rebuild_paragraph(p, segments: list[dict], soup: BeautifulSoup) -> None:
+    """Replace <p> content with segments, wrapping non-normal roles in <span>.
+    Inline tags inside <p> are dropped."""
+    p.clear()
+    for seg in segments:
+        role = seg["role"]
+        text = seg["text"]
+        if not text:
+            continue
+        if role == "normal":
+            p.append(NavigableString(text))
+            continue
+        span = soup.new_tag("span")
+        span["style"] = _ROLE_INLINE_STYLE[role]
+        span.string = text
+        p.append(span)
+
+
 class EpubParser:
     """
     A parser for EPUB files to extract and analyze text content with SVO markup.
@@ -74,43 +122,15 @@ class EpubParser:
             chinese_analyzer: The Chinese analyzer for SVO annotation.
             progress_callback: Optional callback function called after each document.
         """
-
         documents = list(self.book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
-        all_docs_data = []
-        all_flattened_texts: list[str] = []
-
-        logger.info("Gathering all paragraphs for batch processing...")
-        for item in documents:
-            soup = BeautifulSoup(item.get_content(), "html.parser")
-            paragraphs = soup.find_all("p")
-            valid_paragraphs = []
-            paragraph_texts = []
-
-            for p in paragraphs:
-                text = p.get_text()
-                if text.strip():
-                    valid_paragraphs.append(p)
-                    paragraph_texts.append(text)
-
-            all_docs_data.append((item, soup, valid_paragraphs))
-            all_flattened_texts.extend(paragraph_texts)
-
-        if not all_flattened_texts:
+        docs_data, texts = _collect_paragraphs(documents)
+        if not texts:
             logger.warning("No Chinese text found in documents.")
             return
 
-        logger.info(f"Total paragraphs to process: {len(all_flattened_texts)}")
-        all_segments = chinese_analyzer.annotate_batch(all_flattened_texts)
-
-        result_idx = 0
-        for item, soup, valid_paragraphs in all_docs_data:
-            logger.info(f"Applying results to document: {item.file_name}")
-            for p in valid_paragraphs:
-                self._rebuild_paragraph(p, all_segments[result_idx], soup)
-                result_idx += 1
-            item.set_content(str(soup).encode("utf-8"))
-            if progress_callback:
-                progress_callback()
+        logger.info(f"Total paragraphs to process: {len(texts)}")
+        segments = chinese_analyzer.annotate_batch(texts)
+        _apply_segments(docs_data, segments, progress_callback)
 
     def save(self, output_path: str) -> None:
         """
@@ -120,20 +140,3 @@ class EpubParser:
             output_path: The path where the modified EPUB will be saved.
         """
         epub.write_epub(output_path, self.book, {})
-
-    def _rebuild_paragraph(self, p, segments: list[dict], soup: BeautifulSoup) -> None:
-        """Replace <p> content with segments, wrapping non-normal roles in <span>.
-        Inline tags inside <p> are dropped."""
-        p.clear()
-        for seg in segments:
-            role = seg["role"]
-            text = seg["text"]
-            if not text:
-                continue
-            if role == "normal":
-                p.append(NavigableString(text))
-                continue
-            span = soup.new_tag("span")
-            span["style"] = _ROLE_INLINE_STYLE[role]
-            span.string = text
-            p.append(span)
