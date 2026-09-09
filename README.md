@@ -19,11 +19,9 @@ bioCN 是一个为中文 EPUB 电子书增强阅读体验的工具。它通过�
 这种方式会将 `bioCN` 安装为命令行工具，适合直接使用。
 
 ```bash
-# GPU 环境（默认，安装含 CUDA 的 torch）
-pip install git+https://github.com/asinkLuno/bioCN.git[gpu]
-
-# 纯 CPU 环境
-pip install --index-url https://download.pytorch.org/whl/cpu git+https://github.com/asinkLuno/bioCN.git[cpu]
+# 纯 CPU 环境（HanLP 依赖 torch，默认 pip 安装的是 CUDA 版；如无需 GPU 可先装 CPU 版 torch）
+pip install git+https://github.com/asinkLuno/bioCN.git
+pip install torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
 ### 2. 使用 uv 开发安装
@@ -40,17 +38,11 @@ cd bioCN
 **然后**，根据您的环境选择对应的命令安装依赖：
 
 ```bash
-# GPU 环境（默认，安装含 CUDA 的 torch）
-uv sync --extra gpu
+# 默认同步（torch 为 pip 默认版本）
+uv sync
 
-# GPU 环境 + 开发依赖
-uv sync --extra gpu --extra dev
-
-# 纯 CPU 环境
-uv sync --extra cpu --index-url https://download.pytorch.org/whl/cpu
-
-# 纯 CPU 环境 + 开发依赖
-uv sync --extra cpu --extra dev --index-url https://download.pytorch.org/whl/cpu
+# 纯 CPU torch 环境
+uv sync --index-url https://download.pytorch.org/whl/cpu
 ```
 
 ## 使用方法
@@ -58,17 +50,12 @@ uv sync --extra cpu --extra dev --index-url https://download.pytorch.org/whl/cpu
 ### pip 安装后使用
 
 ```bash
-# 处理 EPUB 文件（自动生成输出路径，默认使用内联CSS）
+# 处理 EPUB 文件（自动生成输出路径）
 biocn --input-path your-book.epub
 
 # 指定输出路径
 biocn --input-path your-book.epub --output-path processed-book.epub
 
-# 使用外部CSS样式表（推荐用于大文件）
-biocn --input-path your-book.epub --no-inline-css
-
-# 指定输出路径并使用外部CSS
-biocn --input-path your-book.epub --output-path processed-book.epub --no-inline-css
 ```
 
 ### uv 开发环境使用
@@ -77,31 +64,14 @@ biocn --input-path your-book.epub --output-path processed-book.epub --no-inline-
 # 处理 EPUB 文件
 uv run biocn --input-path your-book.epub
 
-# 使用外部CSS样式表
-uv run biocn --input-path your-book.epub --no-inline-css
-
 # 或者使用模块方式
 uv run python -m src.cli --input-path your-book.epub
 
-# 模块方式使用外部CSS
-uv run python -m src.cli --input-path your-book.epub --no-inline-css
 ```
 
 ### 输出规则
 
 如果不指定 `--output-path`，工具会在输入文件同目录下生成 `原文件名_bio.epub`。
-
-### CSS 样式选项
-
-工具提供两种 CSS 应用模式：
-
-- **内联样式（默认）**：每个 SVO 成分使用内联 `style` 属性，兼容性最好
-- **外部CSS（--no-inline-css）**：使用 CSS 类选择器，文件更小，性能更好
-
-**推荐选择**：
-
-- 小文件或追求最大兼容性：使用默认内联样式
-- 大文件或注重性能：使用 `--no-inline-css`
 
 ### 示例
 
@@ -110,14 +80,9 @@ uv run python -m src.cli --input-path your-book.epub --no-inline-css
 # pip 安装后：
 biocn --input-path 故事新编.epub
 
-# 使用外部CSS处理大文件：
-biocn --input-path 故事新编.epub --no-inline-css
-
 # uv 开发环境：
 uv run biocn --input-path tests/故事新编.epub
 
-# uv 环境使用外部CSS：
-uv run biocn --input-path tests/故事新编.epub --no-inline-css
 ```
 
 ## 技术原理
@@ -139,27 +104,11 @@ uv run biocn --input-path tests/故事新编.epub --no-inline-css
 
 ### 标记规则
 
-工具提供两种 CSS 标记模式：
-
-#### 内联样式模式（默认）
+工具对主谓宾成分统一使用内联样式标记（兼容性最好）：
 
 - **主语**：`<span style="color: #D95F02; font-weight: bold;">文本</span>`
 - **谓语**：`<span style="color: #1B9E77; font-weight: bold;">文本</span>`
 - **宾语**：`<span style="color: #7570B3; font-weight: bold;">文本</span>`
-
-#### 外部CSS模式（--no-inline-css）
-
-- **主语**：`<span class="svo-subject">文本</span>`
-- **谓语**：`<span class="svo-predicate">文本</span>`
-- **宾语**：`<span class="svo-object">文本</span>`
-
-外部CSS模式会自动注入包含以下样式的CSS文件：
-
-```css
-.svo-subject { color: #D95F02; font-weight: bold; }
-.svo-predicate { color: #1B9E77; font-weight: bold; }
-.svo-object { color: #7570B3; font-weight: bold; }
-```
 
 ## 开发
 
@@ -225,18 +174,13 @@ bioCN/
 
 **问题描述**：处理后的 EPUB 文件在某些阅读器中打开大文件时会明显卡顿。
 
-**根本原因**：默认的内联 CSS 嵌入方式导致 HTML 体积膨胀，增加了阅读器的渲染负担。
+**根本原因**：HTML 体积随内联样式标注膨胀，增加了阅读器的渲染负担。
 
-**✅ 已实现解决方案**：
-
-- 新增 `--no-inline-css` 选项，使用外部 CSS 类选择器替代内联样式
-- 外部 CSS 模式显著减少文件大小，提升渲染性能
-- 为大文件处理推荐使用 `--no-inline-css` 模式
+**当前状态**：标注统一使用内联样式，渲染优化留待后续验证。
 
 **后续优化方向**：
 
 - 考虑按章节分割处理，避免单文件过大
-- 优化 CSS 注入方式，进一步减少文件体积
 
 ### 2. 主谓宾提取算法准确性 ✅ 已部分解决
 

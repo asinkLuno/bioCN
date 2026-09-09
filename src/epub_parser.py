@@ -22,17 +22,15 @@ class EpubParser:
     A parser for EPUB files to extract and analyze text content with SVO markup.
     """
 
-    def __init__(self, file_path: str, inline_css: bool = True):
+    def __init__(self, file_path: str):
         """
         Initializes the parser with the path to the EPUB file.
 
         Args:
             file_path: The path to the EPUB file.
-            inline_css: Whether to use inline CSS styles. Default True for better compatibility.
         """
         self.file_path = file_path
         self.book = epub.read_epub(self.file_path)
-        self.inline_css = inline_css
         self._fix_missing_toc_uids()
 
     def _fix_missing_toc_uids(self) -> None:
@@ -76,8 +74,6 @@ class EpubParser:
             chinese_analyzer: The Chinese analyzer for SVO annotation.
             progress_callback: Optional callback function called after each document.
         """
-        if not self.inline_css:
-            self._inject_css_stylesheet()
 
         documents = list(self.book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
         all_docs_data = []
@@ -125,54 +121,6 @@ class EpubParser:
         """
         epub.write_epub(output_path, self.book, {})
 
-    def _inject_css_stylesheet(self) -> None:
-        """
-        Injects a CSS stylesheet for SVO highlighting into the EPUB.
-
-        The CSS is added as a new item in the book and linked from all HTML documents.
-        """
-        css_content = """/* SVO Highlighting Styles */
-.svo-subject {
-    color: #D95F02;
-    font-weight: bold;
-}
-
-.svo-predicate {
-    color: #1B9E77;
-    font-weight: bold;
-}
-
-.svo-object {
-    color: #7570B3;
-    font-weight: bold;
-}
-"""
-
-        css_item = epub.EpubItem(
-            uid="svo-styles",
-            file_name="style/svo-styles.css",
-            media_type="text/css",
-            content=css_content,
-        )
-
-        self.book.add_item(css_item)
-
-        for item in self.book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
-            soup = BeautifulSoup(item.get_content(), "html.parser")
-
-            existing_link = soup.find("link", href="style/svo-styles.css")
-            if not existing_link:
-                head = soup.find("head")
-                if head:
-                    link_tag = soup.new_tag(
-                        "link",
-                        rel="stylesheet",
-                        type="text/css",
-                        href="style/svo-styles.css",
-                    )
-                    head.append(link_tag)
-                    item.set_content(str(soup).encode("utf-8"))
-
     def _rebuild_paragraph(self, p, segments: list[dict], soup: BeautifulSoup) -> None:
         """Replace <p> content with segments, wrapping non-normal roles in <span>.
         Inline tags inside <p> are dropped."""
@@ -186,9 +134,6 @@ class EpubParser:
                 p.append(NavigableString(text))
                 continue
             span = soup.new_tag("span")
-            if self.inline_css:
-                span["style"] = _ROLE_INLINE_STYLE[role]
-            else:
-                span["class"] = f"svo-{role}"
+            span["style"] = _ROLE_INLINE_STYLE[role]
             span.string = text
             p.append(span)
