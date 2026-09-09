@@ -1,6 +1,15 @@
-"""SRL-based SVO annotation of Chinese prose using HanLP (CPU).
+"""DEP-based SVO annotation of Chinese prose using HanLP (CPU).
 
-Character-level Subject-Verb-Object roles via HanLP's SRL and POS tagging.
+Character-level Subject-Verb-Object roles via HanLP's dependency parser
+(CTB9 DEP, SD scheme) plus CTB9 POS tagging.
+
+Syntactic relations are mapped straight onto SVO roles, so the labels stay
+close to school grammar: ``nsubj``/``top`` -> subject, ``root``/``dep``/
+``conj``/``ccomp``/``xcomp``/``rcomp`` (verb POS) -> predicate, ``dobj``/
+``range``/``attr`` -> object. Passives surface their true subject through
+``nsubjpass`` (SRL never exposed it), and 定语 (``assmod``/``rcmod``/
+``det``/``nummod``...) never pollute the core roles, so no DEG/DEC trimming
+is needed.
 
 Usage::
 
@@ -19,23 +28,25 @@ import hanlp
 from hanlp.utils.rules import split_sentence
 from loguru import logger
 
-_ROLE_MAP = {"PRED": "predicate", "ARG0": "subject", "ARG1": "object"}
 _PRIORITY = {"normal": 0, "object": 1, "subject": 2, "predicate": 3}
-# CTB9 POS tags that count as "real" predicates (verbs only, not adjectives)
-_VERB_POS = frozenset({"VV", "VC", "VE"})
+# CTB9 POS tags that act as real predicates (verbs incl. 形容词谓语句 VA).
+_VERB_POS = frozenset({"VV", "VC", "VE", "VA"})
+_PRED_RELS = frozenset({"root", "dep", "conj", "ccomp", "xcomp", "rcomp"})
+_SUBJ_RELS = frozenset({"nsubj", "top"})
+_OBJ_RELS = frozenset({"dobj", "range", "attr"})
 _PARA_SPLIT_RE = re.compile(r"(\n\n+)")
 _PARA_SEP_RE = re.compile(r"\n\n+")
 
 
 class ChineseAnalyzer:
-    """Annotate Chinese prose with SVO roles using HanLP SRL + POS (CPU)."""
+    """Annotate Chinese prose with SVO roles using HanLP DEP + POS (CPU)."""
 
     def __init__(self) -> None:
-        logger.info("Loading HanLP TOK+SRL+POS models on CPU...")
+        logger.info("Loading HanLP TOK+DEP+POS models on CPU...")
         self.tok = hanlp.load(hanlp.pretrained.tok.COARSE_ELECTRA_SMALL_ZH, devices=-1)
-        self.srl = hanlp.load("CPB3_SRL_ELECTRA_SMALL", devices=-1)
+        self.dep = hanlp.load(hanlp.pretrained.dep.CTB9_DEP_ELECTRA_SMALL, devices=-1)
         self.pos = hanlp.load(hanlp.pretrained.pos.CTB9_POS_ELECTRA_SMALL, devices=-1)
-        logger.success("HanLP TOK+SRL+POS models ready.")
+        logger.success("HanLP TOK+DEP+POS models ready.")
 
     def annotate_batch(self, proses: list[str]) -> list[list[dict[str, str]]]:
         """Annotate a batch of prose strings efficiently.
@@ -70,10 +81,10 @@ class ChineseAnalyzer:
 
         if all_sentences:
             all_tokens: list[list[str]] = self.tok(all_sentences)
-            all_srl: list[list] = self.srl(all_tokens, tasks="srl")
+            all_deps: list[list] = self.dep(all_tokens)
             all_pos: list[list[str]] = self.pos(all_tokens)
         else:
-            all_tokens, all_srl, all_pos = [], [], []
+            all_tokens, all_deps, all_pos = [], [], []
 
         results: list[list[dict[str, str]]] = []
         for plan in prose_plans:
@@ -92,7 +103,7 @@ class ChineseAnalyzer:
                             part,
                             sents,
                             all_tokens[lo:hi],
-                            all_srl[lo:hi],
+                            all_deps[lo:hi],
                             all_pos[lo:hi],
                         )
                     )
@@ -104,7 +115,7 @@ def _annotate_paragraph(
     text: str,
     sentences: list[str],
     tok_data: list[list[str]],
-    srl_data: list[list],
+    dep_data: list[list],
     pos_data: list[list[str]],
 ) -> list[dict[str, str]]:
     char_role: list[str] = ["normal"] * len(text)
@@ -117,55 +128,85 @@ def _annotate_paragraph(
 
         tokens: list[str] = tok_data[i] if i < len(tok_data) else []
         pos_tags: list[str] = pos_data[i] if i < len(pos_data) else []
+        deps: list = dep_data[i] if i < len(dep_data) else []
         char_starts = _token_char_starts(sentence, tokens)
-        srl_frames: list = srl_data[i] if i < len(srl_data) else []
 
-        for pas in srl_frames:
-            # Each arg: [form, role_label, tok_begin, tok_end] — token indices, end exclusive
-            for _form, role_label, tok_begin, tok_end in pas:
-                role = _ROLE_MAP.get(role_label)
-                if role is None:
-                    continue
-                if (
-                    tok_begin >= len(char_starts)
-                    or tok_end > len(tokens)
-                    or tok_begin >= tok_end
-                ):
-                    continue
-                c_begin = pos + char_starts[tok_begin]
-                c_end = pos + char_starts[tok_end - 1] + len(tokens[tok_end - 1])
-
-                if role == "predicate" and pos_tags:
-                    # Only color individual verb tokens (VV/VC/VE) within the span.
-                    # Skips leading adverbs (状语, AD) and trailing complements
-                    # (补语, DER/LC/direction verbs). Adjective predicates skipped.
-                    for ti in range(tok_begin, min(tok_end, len(pos_tags))):
-                        if pos_tags[ti] in _VERB_POS and ti < len(char_starts):
-                            tc_begin = pos + char_starts[ti]
-                            tc_end = tc_begin + len(tokens[ti])
-                            for ci in range(tc_begin, min(tc_end, len(text))):
-                                if _PRIORITY["predicate"] > _PRIORITY[char_role[ci]]:
-                                    char_role[ci] = "predicate"
-                    continue
-
-                if role in ("subject", "object") and pos_tags:
-                    # Trim leading 定语 by skipping past the last DEG/DEC token.
-                    last_de_tok = -1
-                    for ti in range(tok_begin, min(tok_end, len(pos_tags))):
-                        if pos_tags[ti] in ("DEG", "DEC"):
-                            last_de_tok = ti
-                    if 0 <= last_de_tok < tok_end - 1:
-                        next_tok = last_de_tok + 1
-                        if next_tok < len(char_starts):
-                            c_begin = pos + char_starts[next_tok]
-
-                for ci in range(c_begin, min(c_end, len(text))):
-                    if _PRIORITY[role] > _PRIORITY[char_role[ci]]:
-                        char_role[ci] = role
+        for token_role, c_begin, c_end in _token_spans(
+            tokens, deps, pos_tags, char_starts
+        ):
+            for ci in range(c_begin, min(c_end, len(text))):
+                if _PRIORITY[token_role] > _PRIORITY[char_role[ci]]:
+                    char_role[ci] = token_role
 
         search_offset = pos + len(sentence)
 
     return _to_segments(text, char_role)
+
+
+def _token_spans(
+    tokens: list[str],
+    deps: list,
+    pos_tags: list[str],
+    char_starts: list[int],
+) -> list[tuple[str, int, int]]:
+    """Yield (role, char_begin, char_end) spans for colored tokens."""
+    n = len(tokens)
+    if n == 0 or len(deps) < n or len(pos_tags) < n:
+        return []
+    rels = [d.get("deprel", "") for d in deps]
+    heads = [int(d.get("head", 0)) for d in deps]  # 1-based, 0 = root
+
+    # Predicates: verb tokens reachable from the root through PRED_RELS edges
+    # only, so dep chains nested inside 定语 (rcmod) never get colored.
+    children: list[list[int]] = [[] for _ in range(n + 1)]
+    for i, h in enumerate(heads):
+        children[h].append(i)
+    pred_set: set[int] = set()
+    stack = list(children[0])  # token(s) attached to the virtual root
+    while stack:
+        i = stack.pop()
+        if i in pred_set or rels[i] not in _PRED_RELS:
+            continue
+        pred_set.add(i)
+        stack.extend(children[i + 1])
+    preds = sorted(i for i in pred_set if pos_tags[i] in _VERB_POS)
+
+    pass_idx = next((i for i in range(n) if rels[i] == "nsubjpass"), -1)
+    # 把字句: the model labels both 施事 and the 受事-after-把 as nsubj of the
+    # root verb; the ba marker splits them into subject and object.
+    ba_idx = next((i for i in range(n) if rels[i] == "ba"), -1)
+
+    def is_pred_head(i: int) -> bool:
+        return heads[i] - 1 in pred_set
+
+    subjs: list[int] = []
+    objs: list[int] = []
+    if pass_idx != -1:
+        # 被动句: only the passive subject counts; the 施事 in the 被-phrase
+        # (a plain nsubj) is not a syntactic subject.
+        subjs = [i for i in range(n) if rels[i] == "nsubjpass"]
+    elif ba_idx != -1:
+        subjs = [
+            i
+            for i in range(n)
+            if rels[i] in _SUBJ_RELS and i < ba_idx and is_pred_head(i)
+        ]
+        objs = [
+            i
+            for i in range(n)
+            if rels[i] in _SUBJ_RELS and i > ba_idx and is_pred_head(i)
+        ]
+    else:
+        subjs = [i for i in range(n) if rels[i] in _SUBJ_RELS and is_pred_head(i)]
+    objs += [i for i in range(n) if rels[i] in _OBJ_RELS and is_pred_head(i)]
+
+    spans: list[tuple[str, int, int]] = []
+    for role, idxs in (("subject", subjs), ("object", objs), ("predicate", preds)):
+        for ti in idxs:
+            if ti >= len(char_starts):
+                continue
+            spans.append((role, char_starts[ti], char_starts[ti] + len(tokens[ti])))
+    return spans
 
 
 def _token_char_starts(sentence: str, tokens: list[str]) -> list[int]:
