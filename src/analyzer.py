@@ -1,4 +1,21 @@
-"""SRL-based SVO annotation for Chinese prose using HanLP."""
+"""SRL-based SVO annotation for Chinese prose using HanLP.
+
+Provides character-level annotation of Subject-Verb-Object roles via
+HanLP's Semantic Role Labeling (SRL) and POS tagging.
+
+Usage::
+
+    from src.analyzer import ChineseAnalyzer
+
+    analyzer = ChineseAnalyzer()          # auto-detect GPU
+    analyzer = ChineseAnalyzer(device=-1)  # force CPU
+    analyzer = ChineseAnalyzer(device=0)   # force GPU 0
+
+    segments = analyzer.annotate("小明吃了一个苹果。")
+    # [{"text": "小明", "role": "subject"}, ...]
+
+    batches = analyzer.annotate_batch(["句子一。", "句子二。"])
+"""
 
 from __future__ import annotations
 
@@ -18,12 +35,22 @@ _PARA_SEP_RE = re.compile(r"\n\n+")
 
 
 class ChineseAnalyzer:
-    """Annotate Chinese prose with SVO roles using HanLP SRL + POS."""
+    """Annotate Chinese prose with SVO roles using HanLP SRL + POS.
 
-    def __init__(self):
-        device = 0 if torch.cuda.is_available() else -1
+    Parameters
+    ----------
+    device:
+        PyTorch device index. ``0`` for GPU 0, ``-1`` for CPU.
+        Defaults to auto-detect: GPU if available, else CPU.
+    """
+
+    def __init__(self, device: int | None = None):
+        if device is None:
+            device = 0 if torch.cuda.is_available() else -1
+        self._device = device
         logger.info(
-            f"Loading HanLP TOK+SRL+POS models on {'GPU' if device == 0 else 'CPU'}..."
+            "Loading HanLP TOK+SRL+POS models on {}...",
+            "GPU" if device >= 0 else "CPU",
         )
         self.tok = hanlp.load(
             hanlp.pretrained.tok.COARSE_ELECTRA_SMALL_ZH, devices=device
@@ -34,15 +61,26 @@ class ChineseAnalyzer:
         )
         logger.success("HanLP TOK+SRL+POS models ready.")
 
+    @property
+    def device(self) -> int:
+        """PyTorch device index in use."""
+        return self._device
+
     def annotate(self, prose: str) -> list[dict[str, str]]:
-        """Annotate a single prose string. Returns segments [{text, role}, ...]."""
+        """Annotate a single prose string.
+
+        Returns a list of ``{"text": ..., "role": ...}`` segments.
+        """
         if not prose:
             return []
         return self.annotate_batch([prose])[0]
 
     def annotate_batch(self, proses: list[str]) -> list[list[dict[str, str]]]:
-        """Annotate a batch of prose strings. Runs one batch inference for all
-        sentences across all proses, then unflattens results."""
+        """Annotate a batch of prose strings efficiently.
+
+        All sentences across all inputs are processed in a single
+        inference pass, then results are unflattened per input.
+        """
         prose_plans: list[list] = []
         all_sentences: list[str] = []
 
