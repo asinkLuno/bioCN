@@ -47,6 +47,36 @@ uv sync --index-url https://download.pytorch.org/whl/cpu
 
 ## 使用方法
 
+### GUI 界面使用
+
+除命令行外，还提供基于 Kivy 的跨平台图形界面（Windows/macOS/Linux）。
+
+```bash
+# 启动 GUI
+biocn-gui
+
+# 或 uv 开发环境
+uv run biocn-gui
+```
+
+在界面中选择输入 EPUB，点击「开始处理」即可。输出默认保存到输入文件同目录的 `*_bio.epub`。主谓宾分析和模型加载在后台线程执行，界面不会卡顿。
+
+### 打包桌面版
+
+用 PyInstaller 把 GUI 打包成当前平台的可执行文件（单目录，内含 Python 运行时和依赖）：
+
+```bash
+bash build_desktop.sh
+
+# 产物在 dist/biocn-gui/ 下，运行：
+./dist/biocn-gui/biocn-gui
+```
+
+注意：
+
+- HanLP 模型不入包，首次运行需联网下载到 `~/.hanlp`（或在目标机器预置该目录）。
+- 打包体积较大（含 torch，约 4–5 GB）。如需更小体积，可用 CPU-only 版 torch 构建，可去除 CUDA 库。
+
 ### pip 安装后使用
 
 ```bash
@@ -137,6 +167,7 @@ uv run pytest tests/test_cli.py
 bioCN/
 ├── src/
 │   ├── cli.py          # 命令行界面
+│   ├── gui.py          # Kivy 跨平台图形界面
 │   ├── analyzer.py     # 中文语法分析器
 │   └── epub_parser.py  # EPUB 文件解析器
 ├── tests/
@@ -152,6 +183,7 @@ bioCN/
 - **ebooklib**: EPUB 文件处理
 - **beautifulsoup4**: HTML 解析
 - **hanlp**: 中文自然语言处理
+- **kivy**: 跨平台图形界面（GUI）
 - **rich**: 终端美化
 
 ## 注意事项

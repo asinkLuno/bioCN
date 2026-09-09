@@ -11,10 +11,12 @@ dependencies = [
     "hanlp>=2.1.3",
     "tqdm>=4.67.1",
     "loguru>=0.7.3",
+    "kivy>=2.3.1",
 ]
 
 [project.scripts]
 biocn = "src.cli:cli"
+biocn-gui = "src.gui:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
@@ -37,6 +39,7 @@ dev = [
     "isort>=7.0.0",
     "mdformat>=1.0.0",
     "pre-commit>=4.5.1",
+    "pyinstaller>=6.22.2",
     "radon>=6.0.1",
     "ruff>=0.14.8",
     "tool>=0.8.0",

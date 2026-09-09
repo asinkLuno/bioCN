@@ -8,6 +8,8 @@ wheels/
 
 # Virtual environments
 .venv
+.venv-build
+*.spec
 
 # Test output files
 tests/*_bio.epub
