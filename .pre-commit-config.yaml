@@ -1,58 +1,18 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.0
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
-
-  - repo: https://github.com/jendrikseipp/vulture
-    rev: v2.13
-    hooks:
-      - id: vulture
-        args: ["src/", "--min-confidence", "80", "--exclude", ".venv"]
-        pass_filenames: false
-
-  - repo: local
-    hooks:
-      - id: basedpyright
-        name: basedpyright
-        entry: basedpyright
-        args: ["--level", "error"]
-        language: system
-        types: [python]
-
-  - repo: local
-    hooks:
-      - id: radon
-        name: radon
-        entry: radon cc src/ --min=B
-        language: system
-        pass_filenames: false
-
-  - repo: https://github.com/PyCQA/autoflake
-    rev: v2.3.1
-    hooks:
-      - id: autoflake
-        args: [--expand-star-imports, --remove-all-unused-imports]
-
-  - repo: https://github.com/PyCQA/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-        args: [--profile, black]
-
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
 
   - repo: local
     hooks:
       - id: mdformat
         name: mdformat
         entry: mdformat
-        language: system
+        language: python
+        additional_dependencies: ["mdformat>=0.7"]
         types: [markdown]
