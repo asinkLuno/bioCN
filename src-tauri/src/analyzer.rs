@@ -805,10 +805,7 @@ mod tests {
     #[test]
     fn progress_counts_sentences_not_paragraphs() {
         fn paragraph(text: &str) -> crate::reader::Paragraph {
-            crate::reader::Paragraph {
-                text: text.to_owned(),
-                source: vec![],
-            }
+            crate::reader::Paragraph::text_only(text.to_owned())
         }
         let paragraphs = vec![
             // A heading: no sentence-final punctuation, still its own run.

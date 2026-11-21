@@ -17,7 +17,7 @@ use tauri::{AppHandle, Manager, Runtime};
 
 use crate::analyzer::{AnalyzerState, ColoredParagraph};
 use crate::library::Library;
-use crate::reader::{Chapter, Paragraph};
+use crate::reader::{Chapter, NoteBody, Paragraph};
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -55,13 +55,32 @@ pub struct BookView {
     pub chapters: Vec<ChapterSummary>,
 }
 
-/// A chapter's paragraphs, each already split into 主谓宾-colored sentences.
+/// One paragraph of a chapter as the reader lays it out: what kind of block it
+/// came from, its colored sentences, and the footnote markers in its text.
+///
+/// The analyzer owns [`ColoredParagraph`]; the block kind and the markers are
+/// the reader's, so they ride along here rather than being pushed into the
+/// analyzer's shape — one decision in one place.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParagraphView {
+    /// The HTML tag this paragraph renders as (`"h1"`…`"h6"`, or `"p"`).
+    pub kind: &'static str,
+    pub colored: ColoredParagraph,
+    /// Footnote markers whose characters sit in the paragraph text.
+    pub note_refs: Vec<crate::reader::NoteRef>,
+}
+
+/// A chapter as the reader shows it: laid-out paragraphs and the footnotes
+/// their markers point at.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChapterView {
     pub index: usize,
     pub title: Option<String>,
-    pub paragraphs: Vec<ColoredParagraph>,
+    pub paragraphs: Vec<ParagraphView>,
+    /// Footnotes in document order, keyed by [`crate::reader::NoteRef::target`].
+    pub footnotes: Vec<NoteBody>,
 }
 
 /// Parsed chapters of `id`, reusing the cached book when it is the same one.
@@ -183,15 +202,29 @@ pub async fn book_chapter<R: Runtime>(
         .collect();
     // Cached analyses are reused; only what this chapter has never had is
     // analyzed. Coloring it also marks it done for the whole-book job.
-    let paragraphs = app
+    let colored = app
         .state::<AnalyzerState>()
         .colored(&app, id.clone(), index, paragraphs)
         .await?;
+
+    // The analysis is positional over the paragraph list, so zipping kinds and
+    // markers back onto it cannot mix two paragraphs up.
+    let paragraphs = chapter
+        .paragraphs
+        .iter()
+        .zip(colored)
+        .map(|(paragraph, colored)| ParagraphView {
+            kind: paragraph.kind.tag(),
+            colored,
+            note_refs: paragraph.note_refs.clone(),
+        })
+        .collect();
 
     Ok(ChapterView {
         index: chapter.index,
         title: chapter.title,
         paragraphs,
+        footnotes: chapter.footnotes.clone(),
     })
 }
 
@@ -205,6 +238,7 @@ mod tests {
             index: 3,
             title: Some("第三章".into()),
             paragraphs: vec![Paragraph::text_only("一。"), Paragraph::text_only("二。")],
+            footnotes: Vec::new(),
         };
         let summary = ChapterSummary {
             index: chapter.index,
@@ -215,5 +249,35 @@ mod tests {
         // The summary is a TOC row: it must stay small however long the book is.
         let json = serde_json::to_string(&summary).expect("serialize");
         assert!(!json.contains('一'), "章节列表不该带正文：{json}");
+    }
+
+    #[test]
+    fn a_chapter_view_carries_layout_and_footnotes() {
+        let view = ChapterView {
+            index: 0,
+            title: None,
+            paragraphs: vec![ParagraphView {
+                kind: "h2",
+                colored: ColoredParagraph {
+                    text: "第二章".into(),
+                    sentences: Vec::new(),
+                },
+                note_refs: vec![crate::reader::NoteRef {
+                    start: 3,
+                    len: 1,
+                    target: "fn1".into(),
+                }],
+            }],
+            footnotes: vec![NoteBody {
+                id: "fn1".into(),
+                text: "注。".into(),
+            }],
+        };
+        let json = serde_json::to_string(&view).expect("serialize");
+        // The frontend lays headings out by `kind` and the footnote buttons by
+        // `noteRefs`; both must survive the bridge with camelCase intact.
+        assert!(json.contains(r#""kind":"h2""#), "{json}");
+        assert!(json.contains(r#""noteRefs""#), "{json}");
+        assert!(json.contains(r#""footnotes""#), "{json}");
     }
 }

@@ -13,6 +13,15 @@
 //! paragraph *text* is what gets analyzed, and the offsets in the result index
 //! into that text.
 //!
+//! What the flattening does keep is the structure a reader needs to lay the
+//! chapter out the way the book meant it (the way EPUB.js gets for free by
+//! handing the original XHTML to the browser): each paragraph remembers the
+//! heading level of the block it came from ([`ParagraphKind`]), and the EPUB 3
+//! footnote convention — `a[epub:type=noteref]` markers, whose bodies live in
+//! `aside[epub:type=footnote]` — is pulled out of the flow into
+//! [`Document::footnotes`], with each marker's characters pointed at by a
+//! [`NoteRef`].
+//!
 //! Two details are worth knowing:
 //!
 //! * Offsets from the analyzer are UTF-16 code units, matching the DOM ranges
@@ -25,8 +34,10 @@
 
 use std::collections::HashMap;
 
-use quick_xml::events::Event;
+use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
+use quick_xml::XmlVersion;
+use serde::Serialize;
 
 /// Blocks whose text is not prose and must not reach the analyzer.
 ///
@@ -90,10 +101,57 @@ fn is_frame(name: &str) -> bool {
     PARAGRAPHS.contains(&name) || CONTAINERS.contains(&name)
 }
 
+/// What kind of block a paragraph came from, which is how the reader lays it
+/// out. Only headings are distinguished: they are the one case where the block
+/// tag changes how the *prose* reads, and the only structure daisyUI has no
+/// class for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParagraphKind {
+    Body,
+    H1,
+    H2,
+    H3,
+    H4,
+    H5,
+    H6,
+}
+
+impl ParagraphKind {
+    /// The HTML tag the reader renders this paragraph as.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::Body => "p",
+            Self::H1 => "h1",
+            Self::H2 => "h2",
+            Self::H3 => "h3",
+            Self::H4 => "h4",
+            Self::H5 => "h5",
+            Self::H6 => "h6",
+        }
+    }
+}
+
+/// The block kind of a frame, from the tag the frame was opened by.
+fn kind_of(name: &str) -> ParagraphKind {
+    match name {
+        "h1" => ParagraphKind::H1,
+        "h2" => ParagraphKind::H2,
+        "h3" => ParagraphKind::H3,
+        "h4" => ParagraphKind::H4,
+        "h5" => ParagraphKind::H5,
+        "h6" => ParagraphKind::H6,
+        _ => ParagraphKind::Body,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Paragraph {
     /// Text with inline markup flattened and whitespace collapsed.
     pub text: String,
+    /// The block this paragraph came from, which decides its element.
+    pub kind: ParagraphKind,
+    /// Footnote markers whose characters sit in this paragraph's text.
+    pub note_refs: Vec<NoteRef>,
     /// Where each character of `text` came from in the chapter document.
     ///
     /// Always the same length as `text.chars()`. Empty means "nobody recorded
@@ -111,6 +169,8 @@ impl Paragraph {
     pub fn text_only(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
+            kind: ParagraphKind::Body,
+            note_refs: Vec::new(),
             source: Vec::new(),
         }
     }
@@ -129,14 +189,20 @@ pub struct Placed {
     /// `<br/>` becomes).
     pub from: u32,
     pub to: u32,
+    /// Index into the document's list of noteref targets when this character is
+    /// part of a footnote marker; [`NO_NOTE`] otherwise. Per character because a
+    /// marker starts and ends *between* characters, exactly like a colored span
+    /// does.
+    pub note: u32,
 }
 
 impl Placed {
-    pub(crate) fn synthetic(ch: char) -> Self {
+    pub(crate) fn synthetic(ch: char, note: u32) -> Self {
         Self {
             ch,
             from: SYNTHETIC,
             to: SYNTHETIC,
+            note,
         }
     }
 
@@ -149,6 +215,46 @@ impl Placed {
 /// [`Placed::from`] of a character that is not in the document.
 pub const SYNTHETIC: u32 = u32::MAX;
 
+/// [`Placed::note`] of a character that is not a footnote marker.
+pub const NO_NOTE: u32 = u32::MAX;
+
+/// A footnote marker's characters, as the reader lays them out.
+///
+/// The offsets are UTF-16 and index into the paragraph text — the same space
+/// the analyzer's sentence offsets use — so the frontend can put a button over
+/// the marker's characters wherever they ended up after coloring.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NoteRef {
+    pub start: usize,
+    pub len: usize,
+    /// The footnote `id` the marker points at, which [`Document::footnotes`]
+    /// (serialized as the chapter's `footnotes`) is keyed by.
+    pub target: String,
+}
+
+/// One footnote's body, pulled out of the reading flow.
+///
+/// Footnote text is prose to a human but not to the analyzer: it is reference
+/// matter, it sits outside the reading order, and coloring it would count it
+/// in the whole-book job. So an `aside[epub:type~=footnote]` is captured whole
+/// and shipped separately, the way an EPUB.js footnote plugin shows it on
+/// demand instead of in the flow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NoteBody {
+    /// The aside's `id`, or a generated `note-N` when the book left it out.
+    pub id: String,
+    /// The aside's paragraphs, joined with spaces.
+    pub text: String,
+}
+
+/// A chapter document's prose, in reading order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Document {
+    pub paragraphs: Vec<Paragraph>,
+    /// Footnotes in document order; [`NoteRef::target`] names one of these.
+    pub footnotes: Vec<NoteBody>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Chapter {
     /// Index in the spine, which is also the reader's page order.
@@ -156,6 +262,8 @@ pub struct Chapter {
     /// The chapter's title from the table of contents, when it has one.
     pub title: Option<String>,
     pub paragraphs: Vec<Paragraph>,
+    /// Footnotes pulled out of the flow, in document order.
+    pub footnotes: Vec<NoteBody>,
 }
 
 /// Why a book could not be read.
@@ -205,10 +313,12 @@ pub fn chapters<R: std::io::Read + std::io::Seek + 'static>(
             reason: error.to_string(),
         })?;
         let html = decode(&bytes);
+        let doc = document(&html);
         out.push(Chapter {
             index,
             title: titles.get(&index).cloned(),
-            paragraphs: paragraphs(&html),
+            paragraphs: doc.paragraphs,
+            footnotes: doc.footnotes,
         });
     }
     Ok(out)
@@ -329,14 +439,14 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
-/// Paragraphs of one chapter document, in reading order.
+/// One chapter document's prose, in reading order.
 ///
 /// The offsets recorded in each [`Paragraph`] are only meaningful for the
 /// *same* string that was parsed, and they are the reason the exporter cannot
 /// work by "find `text` in `html`": `text` is whitespace-collapsed and
 /// entity-decoded, so two paragraphs can collapse to the same string, and a
 /// phrase can appear inside another one.
-pub fn paragraphs(html: &str) -> Vec<Paragraph> {
+pub fn document(html: &str) -> Document {
     let mut reader = Reader::from_str(html);
     let config = reader.config_mut();
     // Real chapters are XHTML, not well-formed XML: converters leave mismatched
@@ -347,7 +457,12 @@ pub fn paragraphs(html: &str) -> Vec<Paragraph> {
     config.allow_unmatched_ends = true;
     config.allow_dangling_amp = true;
 
-    let mut out: Vec<Paragraph> = Vec::new();
+    // The footnote targets a noteref's characters point at, discovered while
+    // parsing (a marker usually comes pages before its body). Kept outside
+    // `state` because a frame flush borrows the state mutably and reads the
+    // targets at the same time.
+    let mut targets: Vec<String> = Vec::new();
+    let mut state = ParseState::default();
     // Open frames, innermost last. Text lands in the innermost frame, so a
     // `<p>` inside a `<div>` collects its own text and the `<div>` keeps only
     // what sits outside the `<p>`.
@@ -373,15 +488,24 @@ pub fn paragraphs(html: &str) -> Vec<Paragraph> {
                 let name = local_name(start.local_name().as_ref());
                 if SKIPPED.contains(&name.as_str()) {
                     skipped += 1;
-                } else if is_frame(&name) {
-                    // A child block ends the text before it: `<div>见<p>字</p>后</div>`
-                    // is "见", "字", "后". The parent frame stays open, so the
-                    // text after the child still belongs to it — that is what
-                    // keeps the paragraphs in reading order.
-                    if let Some(frame) = stack.last_mut() {
-                        frame.flush_text(&mut out);
+                } else {
+                    if is_frame(&name) {
+                        // A child block ends the text before it: `<div>见<p>字</p>后</div>`
+                        // is "见", "字", "后". The parent frame stays open, so the
+                        // text after the child still belongs to it — that is what
+                        // keeps the paragraphs in reading order. The text before
+                        // an aside belongs to the flow, so this flush runs
+                        // before the attributes below switch the sink.
+                        if let Some(frame) = stack.last_mut() {
+                            frame.flush_text(&mut sink(&mut state), &targets);
+                        }
                     }
-                    stack.push(Frame::new(name));
+                    // Attributes are read for every element, framed or not: a
+                    // noteref anchor is inline and never a frame.
+                    open_element(&start, &name, &mut state, &mut targets);
+                    if is_frame(&name) {
+                        stack.push(Frame::new(name));
+                    }
                 }
             }
             Event::End(end_tag) => {
@@ -391,12 +515,18 @@ pub fn paragraphs(html: &str) -> Vec<Paragraph> {
                 } else if is_frame(&name) {
                     // Pop down to the matching frame. A stray end tag for a
                     // frame that was never opened (`allow_unmatched_ends`) must
-                    // not pop a frame that is still open.
+                    // not pop a frame that is still open — nor close a capture
+                    // that never opened.
                     if let Some(position) = stack.iter().rposition(|frame| frame.name == name) {
                         while stack.len() > position {
-                            close_innermost(&mut stack, &mut out);
+                            close_innermost(&mut stack, &mut state, &targets);
                         }
+                        close_element(&name, &mut state);
                     }
+                } else {
+                    // An inline element (`a`) has no frame to match; its own
+                    // end tag is enough to close its capture state.
+                    close_element(&name, &mut state);
                 }
             }
             Event::Empty(empty) => {
@@ -408,7 +538,7 @@ pub fn paragraphs(html: &str) -> Vec<Paragraph> {
                 {
                     // A synthesized space: it is in the paragraph text but not
                     // in the markup, so it has no bytes to point at.
-                    frame.push_placed(Placed::synthetic(' '));
+                    frame.push_placed(Placed::synthetic(' ', NO_NOTE));
                 }
             }
             Event::Text(text) => {
@@ -423,7 +553,7 @@ pub fn paragraphs(html: &str) -> Vec<Paragraph> {
                     // would shift every character after it. EOL normalization
                     // happens in `push_paragraph`, where the bytes no longer
                     // matter.
-                    frame.push_str(&text.into_inner(), span);
+                    frame.push_str(&text.into_inner(), span, state.noteref.unwrap_or(NO_NOTE));
                 }
             }
             Event::CData(cdata) => {
@@ -437,8 +567,9 @@ pub fn paragraphs(html: &str) -> Vec<Paragraph> {
                     // everything after them would be wrong — but they are
                     // marked as having no bytes of their own, which is what
                     // tells the exporter to leave them alone.
+                    let note = state.noteref.unwrap_or(NO_NOTE);
                     for ch in cdata.into_inner().chars() {
-                        frame.push_placed(Placed::synthetic(ch));
+                        frame.push_placed(Placed::synthetic(ch, note));
                     }
                 }
             }
@@ -461,7 +592,7 @@ pub fn paragraphs(html: &str) -> Vec<Paragraph> {
                     // The whole `&name;` is one span for every character it
                     // resolves to, so replacing any of them replaces the
                     // reference rather than leaving a dangling `&`.
-                    frame.push_ref(&text, span);
+                    frame.push_ref(&text, span, state.noteref.unwrap_or(NO_NOTE));
                 }
             }
             Event::Eof => break,
@@ -470,14 +601,186 @@ pub fn paragraphs(html: &str) -> Vec<Paragraph> {
     }
     // A document that ends in the middle of a paragraph still has that text.
     while !stack.is_empty() {
-        close_innermost(&mut stack, &mut out);
+        close_innermost(&mut stack, &mut state, &targets);
     }
-    out
+    // ...and a document truncated inside a footnote keeps the note so far.
+    finish_note(&mut state);
+    Document {
+        paragraphs: state.flow,
+        footnotes: state.notes,
+    }
 }
 
-fn close_innermost(stack: &mut Vec<Frame>, out: &mut Vec<Paragraph>) {
+/// The paragraphs of one chapter document, in reading order.
+///
+/// The exporter re-parses each chapter with this (rather than reusing the
+/// reader's [`Chapter`]s) so that what it colors and what the reader shows are
+/// produced by the *same* call — footnote asides are out of both.
+pub fn paragraphs(html: &str) -> Vec<Paragraph> {
+    document(html).paragraphs
+}
+
+/// Everything the event loop accumulates for one document.
+#[derive(Default)]
+struct ParseState {
+    /// The reading flow: every paragraph not swallowed by a note capture.
+    flow: Vec<Paragraph>,
+    /// Footnotes captured so far, in document order.
+    notes: Vec<NoteBody>,
+    /// The open `aside[epub:type~=footnote]`, when one is being captured.
+    note: Option<NoteCapture>,
+    /// How many open `aside[epub:type~=footnotes]` *sections* enclose the
+    /// reader. A section holds many notes; its own loose text between them is
+    /// not prose and not one note, so it goes nowhere.
+    sections: usize,
+    /// The `a[epub:type~=noteref]` currently open, as an index into the
+    /// document's target list; its characters are marked with it.
+    noteref: Option<u32>,
+    /// Counter for footnote ids a book did not give.
+    generated: usize,
+}
+
+/// One open `aside[epub:type~=footnote]`.
+struct NoteCapture {
+    /// The aside's `id`, or a generated one.
+    id: String,
+    /// The aside's paragraph texts so far.
+    texts: Vec<String>,
+}
+
+/// Where a finished paragraph goes: the reading flow, the note being captured,
+/// or nowhere (a notes section's own loose text is not prose).
+enum Sink<'a> {
+    Flow(&'a mut Vec<Paragraph>),
+    Note(&'a mut Vec<String>),
+    Drop,
+}
+
+impl Sink<'_> {
+    fn take(&mut self, paragraph: Paragraph) {
+        match self {
+            Sink::Flow(out) => out.push(paragraph),
+            // A note keeps only its text: markers inside a note body (the
+            // little back-links real books ship) are dropped with the paragraph
+            // they were on.
+            Sink::Note(texts) => texts.push(paragraph.text),
+            Sink::Drop => {}
+        }
+    }
+}
+
+/// The sink a finished paragraph goes to right now.
+fn sink(state: &mut ParseState) -> Sink<'_> {
+    if let Some(note) = state.note.as_mut() {
+        Sink::Note(&mut note.texts)
+    } else if state.sections > 0 {
+        Sink::Drop
+    } else {
+        Sink::Flow(&mut state.flow)
+    }
+}
+
+/// Starts the capture state an element's attributes call for.
+///
+/// Only `aside[epub:type~=footnote]` captures a note and only
+/// `a[epub:type~=noteref]` marks its characters as a marker; every other
+/// element parses as before. `epub:type` values are space-separated term sets,
+/// so membership is checked per term.
+fn open_element(start: &BytesStart, name: &str, state: &mut ParseState, targets: &mut Vec<String>) {
+    match name {
+        "aside" => {
+            let types = attribute(start, "type").unwrap_or_default();
+            let terms: Vec<&str> = types.split_whitespace().collect();
+            if terms.iter().any(|term| matches!(*term, "footnote" | "endnote")) {
+                let id = attribute(start, "id").unwrap_or_else(|| {
+                    let id = format!("note-{}", state.generated);
+                    state.generated += 1;
+                    id
+                });
+                state.note = Some(NoteCapture {
+                    id,
+                    texts: Vec::new(),
+                });
+            } else if terms
+                .iter()
+                .any(|term| matches!(*term, "footnotes" | "endnotes"))
+            {
+                state.sections += 1;
+            }
+        }
+        "a" => {
+            let is_marker = attribute(start, "type").is_some_and(|types| {
+                types.split_whitespace().any(|term| term == "noteref")
+            });
+            if is_marker
+                // Only a same-document target can be shown on demand: a marker
+                // whose `href` names another spine document keeps its
+                // characters as plain text.
+                && let Some(fragment) = attribute(start, "href")
+                    .and_then(|href| href.split_once('#').map(|(_, fragment)| fragment.to_owned()))
+                && !fragment.is_empty()
+            {
+                targets.push(fragment);
+                state.noteref = Some(u32::try_from(targets.len() - 1).unwrap_or(NO_NOTE));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Ends the capture state the element opened, if it is still open.
+fn close_element(name: &str, state: &mut ParseState) {
+    match name {
+        "aside" => finish_note(state),
+        "a" => state.noteref = None,
+        _ => {}
+    }
+}
+
+/// Closes the open note capture, or unwinds one notes section.
+fn finish_note(state: &mut ParseState) {
+    if let Some(capture) = state.note.take() {
+        // The paragraphs of one aside join with a space, the way a `<br/>`
+        // separated line does.
+        let text = capture.texts.join(" ");
+        if !text.is_empty() {
+            state.notes.push(NoteBody {
+                id: capture.id,
+                text,
+            });
+        }
+    } else {
+        state.sections = state.sections.saturating_sub(1);
+    }
+}
+
+/// The value of an attribute matched by local name, if the element has one.
+///
+/// `epub:type` arrives with whatever prefix the document bound to the epub
+/// namespace, so the match goes through `local_name()`, which already strips
+/// everything up to the first `:`; the only attributes read this way (`type`,
+/// `id`, `href`) are ASCII, so the compare ignores case without dragging in
+/// Unicode tables.
+fn attribute(start: &BytesStart, local: &str) -> Option<String> {
+    start.attributes().filter_map(Result::ok).find_map(|attr| {
+        let is_match = attr
+            .key
+            .local_name()
+            .as_ref()
+            .eq_ignore_ascii_case(local);
+        if is_match {
+            attr.normalized_value(XmlVersion::Implicit1_0)
+                .ok()
+                .map(|value| value.into_owned())
+        } else {
+            None
+        }
+    })
+}
+
+fn close_innermost(stack: &mut Vec<Frame>, state: &mut ParseState, targets: &[String]) {
     if let Some(frame) = stack.pop() {
-        frame.flush(out);
+        frame.flush(&mut sink(state), targets);
     }
 }
 
@@ -506,11 +809,13 @@ impl Frame {
     /// computed by walking it — which is why the parser hands over
     /// [`Event::Text`]'s own content instead of a normalized copy: entity
     /// references are separate events, so a text run is exactly its bytes.
-    fn push_str(&mut self, text: &str, span: std::ops::Range<usize>) {
+    /// `note` marks every character as belonging to that footnote marker, when
+    /// the run sits inside a noteref anchor.
+    fn push_str(&mut self, text: &str, span: std::ops::Range<usize>, note: u32) {
         for (offset, ch) in text.char_indices() {
             let from = byte_in_document(span.start + offset);
             let to = byte_in_document(span.start + offset + ch.len_utf8());
-            self.chars.push(Placed { ch, from, to });
+            self.chars.push(Placed { ch, from, to, note });
         }
     }
 
@@ -519,17 +824,17 @@ impl Frame {
     /// Every character it resolves to points at the whole `&name;`, because
     /// that is the unit a rewrite can replace: wrapping part of it would leave
     /// a dangling `&` in the document.
-    fn push_ref(&mut self, text: &str, span: std::ops::Range<usize>) {
+    fn push_ref(&mut self, text: &str, span: std::ops::Range<usize>, note: u32) {
         let from = byte_in_document(span.start);
         let to = byte_in_document(span.end);
         for ch in text.chars() {
-            self.chars.push(Placed { ch, from, to });
+            self.chars.push(Placed { ch, from, to, note });
         }
     }
 
     /// Ends the paragraph this frame has collected so far, keeping the frame
     /// open for whatever follows.
-    fn flush_text(&mut self, out: &mut Vec<Paragraph>) {
+    fn flush_text(&mut self, sink: &mut Sink, targets: &[String]) {
         // A container's own text is a paragraph too (the `<div>` + `<br>` shape).
         // Indentation between nested blocks collapses to nothing and is dropped
         // by `push_paragraph`, so no "did I hold a child block" bookkeeping is
@@ -537,11 +842,14 @@ impl Frame {
         if self.chars.is_empty() {
             return;
         }
-        push_paragraph(std::mem::take(&mut self.chars), out);
+        let kind = kind_of(&self.name);
+        if let Some(paragraph) = push_paragraph(kind, std::mem::take(&mut self.chars), targets) {
+            sink.take(paragraph);
+        }
     }
 
-    fn flush(mut self, out: &mut Vec<Paragraph>) {
-        self.flush_text(out);
+    fn flush(mut self, sink: &mut Sink, targets: &[String]) {
+        self.flush_text(sink, targets);
     }
 }
 
@@ -581,7 +889,16 @@ fn entity_text(name: &str) -> Option<&'static str> {
 /// exporter can put spans back where they belong. A collapsed space is charged
 /// to the *first* character of the run that follows it, because a span boundary
 /// must not fall between the space and the word it precedes.
-pub fn push_paragraph(chars: Vec<Placed>, out: &mut Vec<Paragraph>) {
+///
+/// The marker runs come out of the same walk: `kept` lines up with `text` one
+/// character to one character, so counting `len_utf16` as it goes gives each
+/// run's offset in the UTF-16 space the reader lays out in. `targets` turns a
+/// run's `Placed::note` index into the footnote id it points at.
+pub fn push_paragraph(
+    kind: ParagraphKind,
+    chars: Vec<Placed>,
+    targets: &[String],
+) -> Option<Paragraph> {
     let mut text = String::new();
     let mut kept: Vec<Placed> = Vec::with_capacity(chars.len());
     // Whitespace seen but not yet emitted: one run may end in spaces and the
@@ -597,9 +914,13 @@ pub fn push_paragraph(chars: Vec<Placed>, out: &mut Vec<Paragraph>) {
         if pending_space && !text.is_empty() {
             // The space is not in the source, so it has no bytes of its own; it
             // is attributed to this character's span, keeping the two together.
+            // It is not part of a footnote marker even when it sits between the
+            // prose and one: the space precedes the marker, and charging it to
+            // the marker would widen the run past the marker's own characters.
             text.push(' ');
             kept.push(Placed {
                 ch: ' ',
+                note: NO_NOTE,
                 ..placed.clone()
             });
         }
@@ -608,9 +929,59 @@ pub fn push_paragraph(chars: Vec<Placed>, out: &mut Vec<Paragraph>) {
         kept.push(placed);
     }
     if text.is_empty() {
-        return;
+        return None;
     }
-    out.push(Paragraph { text, source: kept });
+    Some(Paragraph {
+        kind,
+        note_refs: marker_runs(&kept, targets),
+        text,
+        source: kept,
+    })
+}
+
+/// Groups a paragraph's characters into the footnote markers they belong to.
+///
+/// A marker's characters are contiguous, so one run of equal `Placed::note`
+/// values is one marker; a synthetic or unmarked character closes the run.
+fn marker_runs(kept: &[Placed], targets: &[String]) -> Vec<NoteRef> {
+    let mut refs = Vec::new();
+    let mut at = 0usize;
+    let mut run: Option<(u32, usize)> = None;
+    for placed in kept {
+        match run {
+            Some((index, _)) if index == placed.note => {}
+            Some((index, start)) => {
+                close_run(&mut refs, index, start, at, targets);
+                run = (placed.note != NO_NOTE).then_some((placed.note, at));
+            }
+            None if placed.note != NO_NOTE => run = Some((placed.note, at)),
+            None => {}
+        }
+        at += placed.ch.len_utf16();
+    }
+    if let Some((index, start)) = run {
+        close_run(&mut refs, index, start, at, targets);
+    }
+    refs
+}
+
+fn close_run(
+    refs: &mut Vec<NoteRef>,
+    index: u32,
+    start: usize,
+    end: usize,
+    targets: &[String],
+) {
+    // An index the parser never registered a target for is a parse that went
+    // wrong in a way nothing else noticed; dropping the marker beats a button
+    // that shows nothing.
+    if let Some(target) = targets.get(index as usize) {
+        refs.push(NoteRef {
+            start,
+            len: end - start,
+            target: target.clone(),
+        });
+    }
 }
 
 /// HTML entities that XHTML chapters use and XML does not define.
@@ -781,5 +1152,117 @@ mod tests {
     fn a_paragraph_with_only_markup_is_dropped() {
         let html = "<body><p><img src=\"a.png\"/></p><p>字。</p></body>";
         assert_eq!(texts(html), ["字。"]);
+    }
+
+    #[test]
+    fn a_heading_carries_its_level() {
+        let html = "<body><h2>第二章</h2><p>正文。</p></body>";
+        let doc = document(html);
+        let kinds: Vec<&'static str> = doc.paragraphs.iter().map(|p| p.kind.tag()).collect();
+        assert_eq!(kinds, ["h2", "p"]);
+    }
+
+    #[test]
+    fn a_footnote_aside_is_pulled_out_of_the_flow() {
+        // The EPUB 3 shape: the marker is an `a[epub:type=noteref]` inside the
+        // paragraph, the body is an `aside[epub:type=footnote]` after it.
+        // `r##` because the hrefs contain `"#`.
+        let html = r##"<body>
+            <p>他走了。<a epub:type="noteref" href="#fn1">①</a></p>
+            <aside epub:type="footnote" id="fn1"><p>他死于一月。</p></aside>
+            <p>下一段。</p>
+        </body>"##;
+        let doc = document(html);
+        assert_eq!(
+            doc.paragraphs.iter().map(|p| p.text.as_str()).collect::<Vec<_>>(),
+            ["他走了。①", "下一段。"],
+            "脚注正文不能混进阅读流"
+        );
+        assert_eq!(
+            doc.footnotes,
+            [NoteBody { id: "fn1".into(), text: "他死于一月。".into() }]
+        );
+        // The marker's characters stay in the paragraph text and are pointed at
+        // by a UTF-16 range, which is what the frontend needs to lay a button
+        // over them.
+        let marker = &doc.paragraphs[0].note_refs;
+        assert_eq!(
+            marker,
+            &[NoteRef {
+                start: 4,
+                len: 1,
+                target: "fn1".into()
+            }][..]
+        );
+    }
+
+    #[test]
+    fn a_footnote_without_an_id_gets_a_generated_one() {
+        let html = r#"<body><aside epub:type="footnote"><p>注。</p></aside></body>"#;
+        let doc = document(html);
+        assert_eq!(doc.footnotes[0].id, "note-0");
+    }
+
+    #[test]
+    fn an_aside_without_epub_type_stays_in_the_flow() {
+        // Not every aside is a footnote; only `epub:type` says so.
+        let html = r#"<body><aside><p>侧栏文字。</p></aside></body>"#;
+        let doc = document(html);
+        assert_eq!(texts(html), ["侧栏文字。"]);
+        assert!(doc.footnotes.is_empty());
+    }
+
+    #[test]
+    fn a_noteref_without_a_fragment_keeps_plain_text() {
+        // The href may point at another document; without a `#fragment` there
+        // is nothing in this chapter to point at, so the characters stay plain.
+        let html = r#"<body><p>他走了。<a epub:type="noteref" href="notes.xhtml">①</a></p></body>"#;
+        let doc = document(html);
+        assert_eq!(doc.paragraphs[0].text, "他走了。①");
+        assert!(doc.paragraphs[0].note_refs.is_empty());
+    }
+
+    #[test]
+    fn a_notes_section_holds_one_note_per_footnote_aside() {
+        // Some books wrap their notes in a plural section: each inner aside is
+        // one note, and the section's own loose text between them is not prose.
+        let html = r#"<body>
+            <aside epub:type="footnotes">
+                <aside epub:type="footnote" id="n1"><p>注一。</p></aside>
+                页脚文字
+                <aside epub:type="footnote" id="n2"><p>注二。</p></aside>
+            </aside>
+        </body>"#;
+        let doc = document(html);
+        assert!(doc.paragraphs.is_empty(), "节内散落的文字不该进阅读流");
+        assert_eq!(
+            doc.footnotes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            ["n1", "n2"]
+        );
+    }
+
+    #[test]
+    fn a_multi_paragraph_footnote_joins_with_spaces() {
+        let html = r#"<body><aside epub:type="footnote" id="fn2"><p>一句。</p><p>两句。</p></aside></body>"#;
+        let doc = document(html);
+        assert_eq!(doc.footnotes[0].text, "一句。 两句。");
+    }
+
+    #[test]
+    fn a_noteref_marker_survives_whitespace_collapse() {
+        // The marker text and the prose around it may be separated by source
+        // whitespace, which collapses; the range must still cover the marker
+        // characters exactly.
+        let html = r##"<body>
+            <p>他走了
+            <a epub:type="noteref" href="#fn1">1</a>。</p>
+            <aside epub:type="footnote" id="fn1"><p>注。</p></aside>
+        </body>"##;
+        let doc = document(html);
+        assert_eq!(doc.paragraphs[0].text, "他走了 1。");
+        assert_eq!(
+            doc.paragraphs[0].note_refs,
+            [NoteRef { start: 4, len: 1, target: "fn1".into() }]
+        );
     }
 }
