@@ -30,6 +30,31 @@ export interface ColoredParagraph {
   sentences: ColoredSentence[];
 }
 
+export interface NoteRef {
+  /** UTF-16 offset of the marker within its paragraph text. */
+  start: number;
+  /** UTF-16 length of the marker run. */
+  len: number;
+  /** The footnote id this marker points at. */
+  target: string;
+}
+
+/** One footnote's body, pulled out of the reading flow by the Rust parser. */
+export interface NoteBody {
+  /** The footnote's id, which `NoteRef.target` names. */
+  id: string;
+  /** The footnote's paragraphs, joined with spaces. */
+  text: string;
+}
+
+export interface ParagraphView {
+  /** The HTML tag this paragraph renders as: `"h1"`…`"h6"`, or `"p"`. */
+  kind: string;
+  colored: ColoredParagraph;
+  /** Footnote markers whose characters sit in the paragraph text. */
+  noteRefs: NoteRef[];
+}
+
 export interface ChapterSummary {
   index: number;
   title: string | null;
@@ -45,7 +70,9 @@ export interface BookView {
 export interface ChapterView {
   index: number;
   title: string | null;
-  paragraphs: ColoredParagraph[];
+  paragraphs: ParagraphView[];
+  /** Footnotes in document order, keyed by `NoteRef.target`. */
+  footnotes: NoteBody[];
 }
 
 /**

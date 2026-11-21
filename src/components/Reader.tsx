@@ -7,10 +7,12 @@ import {
   message,
   type BookView,
   type ChapterView,
-  type ColoredParagraph,
   type ColoredSentence,
+  type NoteBody,
+  type ParagraphView,
   type Role,
 } from "../lib/reading";
+import { ModalBackdrop, useDialog } from "./dialog";
 
 interface Props {
   id: string;
@@ -39,6 +41,9 @@ export function Reader({ id, onClose, onOpenSettings, modelsOpen }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [missingModel, setMissingModel] = useState(false);
   const [tocOpen, setTocOpen] = useState(false);
+  // The footnote a marker opened, or none. One dialog for the whole chapter:
+  // every marker click swaps its content instead of stacking dialogs.
+  const [note, setNote] = useState<NoteBody | null>(null);
   // Bumped to re-ask for the chapter. Downloading a model in settings is the
   // common reason a chapter failed, and the reader must not sit on that error
   // until the user navigates away and back.
@@ -288,13 +293,20 @@ export function Reader({ id, onClose, onOpenSettings, modelsOpen }: Props) {
             ))}
           </div>
         ) : (
-          <article className="space-y-4 text-[17px] leading-[1.85] sm:text-lg">
+          <article className="flex flex-col gap-4 text-[17px] leading-[1.85] sm:text-lg">
             {chapter.paragraphs.map((paragraph, at) => (
-              <Paragraph key={at} paragraph={paragraph} />
+              <Paragraph
+                key={at}
+                paragraph={paragraph}
+                notes={chapter.footnotes}
+                onNote={setNote}
+              />
             ))}
           </article>
         )}
       </main>
+
+      {note !== null && <NoteDialog note={note} onClose={() => setNote(null)} />}
 
       <footer className="sticky bottom-0 border-t border-base-content/10 bg-base-100/90 backdrop-blur">
         <div className="mx-auto flex w-full max-w-3xl items-center gap-2 px-2 py-2">
@@ -324,76 +336,222 @@ export function Reader({ id, onClose, onOpenSettings, modelsOpen }: Props) {
 }
 
 /**
- * One paragraph: its sentences, each split into role spans.
+ * One paragraph, rendered as the element its block kind names.
+ *
+ * A heading paragraph (`kind: "h2"` and friends) becomes that heading; daisyUI
+ * has no heading component, so the sizes below are plain Tailwind type scale,
+ * with margins on top of the article's flex gap for chapter-title rhythm.
+ */
+const HEADING_CLASS: Record<string, string> = {
+  h1: "mt-10 text-2xl font-bold leading-snug first:mt-0",
+  h2: "mt-8 text-xl font-bold leading-snug first:mt-0",
+  h3: "mt-6 text-lg font-semibold leading-snug first:mt-0",
+  h4: "mt-6 text-base font-semibold first:mt-0",
+  h5: "mt-6 text-base font-medium first:mt-0",
+  h6: "mt-6 text-sm font-semibold first:mt-0",
+};
+
+function Paragraph({
+  paragraph,
+  notes,
+  onNote,
+}: {
+  paragraph: ParagraphView;
+  notes: NoteBody[];
+  onNote: (note: NoteBody) => void;
+}) {
+  const body = <ParagraphBody paragraph={paragraph} notes={notes} onNote={onNote} />;
+  const headingClass = HEADING_CLASS[paragraph.kind];
+  if (headingClass === undefined) {
+    return <p>{body}</p>;
+  }
+  // `kind` is the Rust parser's `ParagraphKind::tag()`, so only real tags land
+  // here; the cast is what lets one component render any of them.
+  const Tag = paragraph.kind as "h1";
+  return <Tag className={headingClass}>{body}</Tag>;
+}
+
+/** A stretch of paragraph text that renders as exactly one node. */
+interface Piece {
+  /** UTF-16 offsets into the paragraph text. */
+  start: number;
+  end: number;
+  /** `null` renders as plain text; a role renders as its colored span. */
+  role: Role | null;
+  /** A footnote target renders as a marker button; `null` otherwise. */
+  target: string | null;
+}
+
+/**
+ * One paragraph's text: its sentences, each split into role spans, with
+ * footnote markers laid over both.
+ *
+ * The pieces come from one walk over cut points — every sentence and segment
+ * boundary plus every marker edge. Each cut-to-cut stretch asks first whether a
+ * marker covers it (markers win, so a marker inside a colored span still gets
+ * its button) and otherwise colors by the segment at that position.
  *
  * `normal` spans are rendered as plain text with no color rather than given a
  * class: a class on every span of every paragraph is a lot of markup for no
  * visual difference.
  *
  * There is no color-switch prop: whether spans exist is decided by the analyzer
- * (coloring off returns paragraphs with no segments), so this component renders
- * whatever it is given and the page never disagrees with the setting.
+ * (coloring off returns paragraphs with no sentences), so this component
+ * renders whatever it is given and the page never disagrees with the setting —
+ * and markers still work with coloring off, because they do not depend on the
+ * analyzer at all.
  */
-function Paragraph({ paragraph }: { paragraph: ColoredParagraph }) {
-  if (paragraph.sentences.length === 0) {
-    return <p>{paragraph.text}</p>;
-  }
-  // The sentences are trimmed, so the space between two of them — "He slept.
-  // She woke." — belongs to neither. It is taken from the paragraph text by
-  // offset, which is why sentence offsets are carried at all.
-  const pieces: ReactNode[] = [];
+function ParagraphBody({
+  paragraph,
+  notes,
+  onNote,
+}: {
+  paragraph: ParagraphView;
+  notes: NoteBody[];
+  onNote: (note: NoteBody) => void;
+}) {
+  const text = paragraph.colored.text;
+  const nodes: ReactNode[] = [];
   let at = 0;
-  paragraph.sentences.forEach((sentence, index) => {
-    if (sentence.start > at) {
-      pieces.push(paragraph.text.slice(at, sentence.start));
+  for (const piece of layout(paragraph)) {
+    if (piece.start > at) nodes.push(text.slice(at, piece.start));
+    const slice = text.slice(piece.start, piece.end);
+    if (piece.target !== null) {
+      const note = notes.find((entry) => entry.id === piece.target);
+      nodes.push(
+        note !== undefined ? (
+          // A marker is a small ghost button raised above the line: daisyUI
+          // has no footnote component, and `btn-ghost btn-xs` keeps it from
+          // shouting inside prose.
+          <sup key={piece.start}>
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs align-super px-0.5 text-primary"
+              onClick={() => onNote(note)}
+            >
+              {slice}
+            </button>
+          </sup>
+        ) : (
+          // A marker the parser could not resolve (the aside is gone, or it
+          // named another document) stays the text it always was.
+          slice
+        ),
+      );
+    } else if (piece.role !== null) {
+      nodes.push(
+        <span key={piece.start} className={roleClass(piece.role)}>
+          {slice}
+        </span>,
+      );
+    } else {
+      nodes.push(slice);
     }
-    pieces.push(<span key={`${sentence.start}:${index}`}>{sentenceBody(sentence)}</span>);
-    at = sentence.start + sentence.text.length;
-  });
-  if (at < paragraph.text.length) pieces.push(paragraph.text.slice(at));
-  return <p>{pieces}</p>;
+    at = piece.end;
+  }
+  // The sentences are trimmed and the analyzer may skip characters, so the
+  // text is the authority: anything the walk did not cover is still shown.
+  if (at < text.length) nodes.push(text.slice(at));
+  return <>{nodes}</>;
 }
 
 /**
- * A sentence's spans, with the sentence text filling any gap between them.
+ * The paragraph text cut into renderable pieces: sentence spans, and footnote
+ * markers winning over them.
  *
- * The spans come from the analyzer, and an analyzer that skipped a character
- * (or emitted offsets the renderer does not expect) must not silently drop it
- * from the page: the sentence text is the authority, and the spans only say
- * which parts of it are colored. Slicing by `segment.start` — the same
- * technique the paragraph uses between sentences — makes the two agree by
- * construction.
+ * Adjacent stretches with the same appearance merge, so the common paragraph —
+ * a few colored sentences, no markers — renders exactly like the previous
+ * sentence-per-span walk did.
  */
-function sentenceBody(sentence: ColoredSentence): ReactNode {
-  if (sentence.segments.length === 0) {
-    // No spans means the paragraph came back uncolored: coloring is off, or the
-    // analyzer rejected this sentence. The sentence text is still the text, so
-    // it must still be shown.
-    return sentence.text;
+function layout(paragraph: ParagraphView): Piece[] {
+  const { text, sentences } = paragraph.colored;
+  const cuts = new Set<number>([0, text.length]);
+  for (const sentence of sentences) {
+    cuts.add(sentence.start);
+    cuts.add(sentence.start + sentence.text.length);
+    for (const segment of sentence.segments) {
+      cuts.add(sentence.start + segment.start);
+      cuts.add(sentence.start + segment.start + segment.text.length);
+    }
   }
-  const pieces: ReactNode[] = [];
-  let at = 0;
-  sentence.segments.forEach((segment, index) => {
-    if (segment.start > at) {
-      pieces.push(sentence.text.slice(at, segment.start));
-    }
-    if (segment.role === "normal") {
-      pieces.push(segment.text);
+  for (const ref of paragraph.noteRefs) {
+    cuts.add(ref.start);
+    cuts.add(ref.start + ref.len);
+  }
+  const ordered = [...cuts]
+    .filter((cut) => cut >= 0 && cut <= text.length)
+    .sort((a, b) => a - b);
+
+  const pieces: Piece[] = [];
+  for (let at = 0; at < ordered.length - 1; at++) {
+    const start = ordered[at];
+    const end = ordered[at + 1];
+    if (start >= end) continue;
+    const marker = paragraph.noteRefs.find(
+      (ref) => ref.start <= start && end <= ref.start + ref.len,
+    );
+    const piece: Piece = marker
+      ? { start, end, role: null, target: marker.target }
+      : { start, end, role: roleAt(sentences, start), target: null };
+    const previous = pieces[pieces.length - 1];
+    if (
+      previous !== undefined &&
+      previous.role === piece.role &&
+      previous.target === piece.target &&
+      previous.end === start
+    ) {
+      previous.end = end;
     } else {
-      pieces.push(
-        <span key={index} className={roleClass(segment.role)}>
-          {segment.text}
-        </span>,
-      );
+      pieces.push(piece);
     }
-    at = Math.max(at, segment.start + segment.text.length);
-  });
-  if (at < sentence.text.length) pieces.push(sentence.text.slice(at));
+  }
   return pieces;
+}
+
+/** The role of the character at paragraph offset `at`, or `null` for plain. */
+function roleAt(sentences: ColoredSentence[], at: number): Role | null {
+  const sentence = sentences.find(
+    (entry) => entry.start <= at && at < entry.start + entry.text.length,
+  );
+  if (sentence === undefined) return null;
+  const segment = sentence.segments.find(
+    (entry) =>
+      sentence.start + entry.start <= at &&
+      at < sentence.start + entry.start + entry.text.length,
+  );
+  // A `normal` segment is prose: no class, like the gaps between segments.
+  return segment !== undefined && segment.role !== "normal" ? segment.role : null;
 }
 
 function roleClass(role: Role): string {
   // daisyUI has no 主谓宾 tokens, and these colors come from bioCN itself so the
   // desktop app reads like the web version: see `index.css`.
   return `svo svo-${role}`;
+}
+
+/**
+ * One footnote, shown as a daisyUI modal.
+ *
+ * The dialog mounts only while a note is open, so `open` is constant and the
+ * effect is just the `showModal` on the way up; Escape and the backdrop call
+ * `onClose`, which unmounts it — the next marker click gets a fresh dialog.
+ */
+function NoteDialog({ note, onClose }: { note: NoteBody; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useDialog(ref, true);
+  return (
+    <dialog ref={ref} className="modal" onClose={onClose}>
+      <div className="modal-box">
+        <p className="whitespace-pre-wrap leading-relaxed text-sm text-base-content/80">
+          {note.text}
+        </p>
+        <div className="modal-action">
+          <button type="button" className="btn btn-sm" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+      </div>
+      <ModalBackdrop onClose={onClose} />
+    </dialog>
+  );
 }

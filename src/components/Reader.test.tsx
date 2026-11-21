@@ -28,20 +28,25 @@ const chapter: reading.ChapterView = {
   title: "One",
   paragraphs: [
     {
-      text: "他走了。",
-      sentences: [
-        {
-          text: "他走了。",
-          start: 0,
-          segments: [
-            { text: "他", start: 0, role: "subject" },
-            { text: "走", start: 1, role: "predicate" },
-            { text: "了。", start: 2, role: "normal" },
-          ],
-        },
-      ],
+      kind: "p",
+      colored: {
+        text: "他走了。",
+        sentences: [
+          {
+            text: "他走了。",
+            start: 0,
+            segments: [
+              { text: "他", start: 0, role: "subject" },
+              { text: "走", start: 1, role: "predicate" },
+              { text: "了。", start: 2, role: "normal" },
+            ],
+          },
+        ],
+      },
+      noteRefs: [],
     },
   ],
+  footnotes: [],
 };
 
 /** The prose is split into spans, so its text is not one DOM node. */
@@ -98,22 +103,27 @@ describe("reader", () => {
       ...chapter,
       paragraphs: [
         {
-          text: "He slept. She woke.",
-          sentences: [
-            {
-              text: "He slept.",
-              start: 0,
-              // Segments cover the whole sentence, punctuation included.
-              segments: [
-                { text: "He ", start: 0, role: "normal" },
-                { text: "slept", start: 3, role: "predicate" },
-                { text: ".", start: 8, role: "normal" },
-              ],
-            },
-            { text: "She woke.", start: 10, segments: [] },
-          ],
+          kind: "p",
+          colored: {
+            text: "He slept. She woke.",
+            sentences: [
+              {
+                text: "He slept.",
+                start: 0,
+                // Segments cover the whole sentence, punctuation included.
+                segments: [
+                  { text: "He ", start: 0, role: "normal" },
+                  { text: "slept", start: 3, role: "predicate" },
+                  { text: ".", start: 8, role: "normal" },
+                ],
+              },
+              { text: "She woke.", start: 10, segments: [] },
+            ],
+          },
+          noteRefs: [],
         },
       ],
+      footnotes: [],
     });
     renderReader();
     await prose();
@@ -176,20 +186,25 @@ describe("reader", () => {
       ...chapter,
       paragraphs: [
         {
-          text: "他走了。",
-          sentences: [
-            {
-              text: "他走了。",
-              start: 0,
-              // The period is not covered by any span.
-              segments: [
-                { text: "他", start: 0, role: "subject" },
-                { text: "走", start: 1, role: "predicate" },
-              ],
-            },
-          ],
+          kind: "p",
+          colored: {
+            text: "他走了。",
+            sentences: [
+              {
+                text: "他走了。",
+                start: 0,
+                // The period is not covered by any span.
+                segments: [
+                  { text: "他", start: 0, role: "subject" },
+                  { text: "走", start: 1, role: "predicate" },
+                ],
+              },
+            ],
+          },
+          noteRefs: [],
         },
       ],
+      footnotes: [],
     });
     const { container } = renderReader();
     await prose();
@@ -254,5 +269,76 @@ describe("reader", () => {
     // Chapter 2 is the last one: the right arrow must not wrap or overshoot.
     await userEvent.keyboard("{ArrowRight}");
     await waitFor(() => expect(chapterMock).not.toHaveBeenCalled());
+  });
+
+  it("lays a heading paragraph out as a heading", async () => {
+    // The parser marks the block a paragraph came from; the reader must not
+    // flatten a chapter title back into body text.
+    chapterMock.mockResolvedValue({
+      ...chapter,
+      paragraphs: [
+        { kind: "h2", colored: { text: "第二章", sentences: [] }, noteRefs: [] },
+        { kind: "p", colored: { text: "正文。", sentences: [] }, noteRefs: [] },
+      ],
+      footnotes: [],
+    });
+    const { container } = renderReader();
+    const article = await prose();
+    expect(screen.getByRole("heading", { level: 2, name: "第二章" })).toBeInTheDocument();
+    // The header also holds a `<p>` (the book title), so the body paragraph
+    // is addressed inside the article only.
+    expect(within(article).getByText("正文。")).toBeInTheDocument();
+    expect(container.querySelector("article > h2")).not.toBeNull();
+  });
+
+  it("opens the footnote a marker points at", async () => {
+    // The EPUB 3 shape: a noteref marker in the text, its body shipped as the
+    // chapter's footnotes. Clicking the marker shows the body in a modal.
+    chapterMock.mockResolvedValue({
+      ...chapter,
+      paragraphs: [
+        {
+          kind: "p",
+          colored: {
+            text: "他走了。①",
+            sentences: [{ text: "他走了。", start: 0, segments: [] }],
+          },
+          noteRefs: [{ start: 4, len: 1, target: "fn1" }],
+        },
+      ],
+      footnotes: [{ id: "fn1", text: "他死于一月。" }],
+    });
+    const user = userEvent.setup();
+    renderReader();
+    await prose();
+
+    await user.click(screen.getByRole("button", { name: "①" }));
+    expect(await screen.findByText("他死于一月。")).toBeVisible();
+    // The backdrop's aria-label is also 关闭, so the action button is
+    // addressed by its text, which only the one inside the box has.
+    await user.click(screen.getByText("关闭"));
+    await waitFor(() =>
+      expect(screen.queryByText("他死于一月。")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("keeps an unresolvable marker as plain text", async () => {
+    // A marker whose footnote never arrived (a missing aside, or one that
+    // names another document) must not render a button that shows nothing.
+    chapterMock.mockResolvedValue({
+      ...chapter,
+      paragraphs: [
+        {
+          kind: "p",
+          colored: { text: "他走了。①", sentences: [] },
+          noteRefs: [{ start: 4, len: 1, target: "gone" }],
+        },
+      ],
+      footnotes: [],
+    });
+    renderReader();
+    await prose();
+    expect(screen.queryByRole("button", { name: "①" })).not.toBeInTheDocument();
+    expect(await prose()).toHaveTextContent("他走了。①");
   });
 });
